@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE hibernate-configuration PUBLIC
+        "-//Hibernate/Hibernate Configuration DTD//EN"
+        "https://hibernate.org/dtd/hibernate-configuration-3.0.dtd">
+<hibernate-configuration>
+    <session-factory>
+
+        <!-- Параметры подключения к БД -->
+        <property name="hibernate.connection.driver_class">org.postgresql.Driver</property>
+        <property name="hibernate.connection.url">
+            jdbc:postgresql://localhost:5432/insurance_db
+        </property>
+        <property name="hibernate.connection.username">postgres</property>
+        <property name="hibernate.connection.password">esagug999</property>
+
+        <!-- важно: -->
+        <property name="hibernate.dialect">org.hibernate.dialect.PostgreSQLDialect</property>
+
+
+        <!-- Отображение SQL в консоли -->
+        <property name="hibernate.show_sql">true</property>
+
+        <!-- Автоматическое создание таблиц -->
+        <property name="hibernate.hbm2ddl.auto">update</property>
+
+        <!-- Подключение сущностей -->
+        <mapping class="org.strah.model.users.AppUser"/>
+        <mapping class="org.strah.model.policies.InsurancePolicy"/>
+        <mapping class="org.strah.model.policies.FinancialRiskPolicy"/>
+        <mapping class="org.strah.model.claims.Claim"/>
+        <mapping class="org.strah.model.policies.StandardPolicy"/>
+        <mapping class="org.strah.model.applications.Application"/>
+        <mapping class="org.strah.model.applications.ApplicationStatus"/> <!-- enum через JPA -->
+        <mapping class="org.strah.model.types.InsuranceType"/>
+        <mapping class="org.strah.model.types.RiskCoeff"/>
+        <mapping class="org.strah.model.types.ApplicationTemplate"/>
+        <mapping class="org.strah.model.types.RiskCoeffHistory"/>
+        <mapping class="org.strah.model.applications.ApplicationAnswer"/>
+
+
+    </session-factory>
+</hibernate-configuration>
