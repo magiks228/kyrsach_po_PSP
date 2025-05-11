@@ -67,4 +67,8 @@ public class InsuranceType {
     public double getLimitMax()     { return limitMax; }
     public int    getDefaultTerm()  { return defaultTerm; }
     public double getFranchisePercent() { return franchisePercent; }
+
+    public String getName() {
+        return nameRu;
+    }
 }
