@@ -4,32 +4,65 @@ import javax.swing.table.AbstractTableModel;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ApplicationModel extends AbstractTableModel
-        implements MainFrame.LineReceiver {
+public class ApplicationModel extends AbstractTableModel implements MainFrame.LineReceiver {
+    private static final String SEP = "\u001F";
 
-    private final String[] COLS = { "ID", "Тип", "Мес.", "Статус", "Премия" };
-    private final java.util.List<Object[]> data = new java.util.ArrayList<>();
+    private final List<String[]> rows = new ArrayList<>();
+    private final String[] columnNames = {
+            "ID", "Тип", "Мес.", "Покрытие", "Премия", "Статус", "Начало", "Конец"
+    };
 
-    /* таблица JTable спрашивает размеры */
-    public int getRowCount()            { return data.size(); }
-    public int getColumnCount()         { return COLS.length; }
-    public String getColumnName(int c)  { return COLS[c]; }
+    @Override
+    public void addFromLine(String line) {
+        String[] parts;
+        if (line.contains(SEP)) {
+            // split только на 8 частей
+            parts = line.split(SEP, 8);
+        } else {
+            parts = line.split(" ", 8);
+        }
 
-    public Object getValueAt(int r,int c){ return data.get(r)[c]; }
+        // гарантируем длину 8
+        if (parts.length < 8) {
+            String[] tmp = new String[8];
+            System.arraycopy(parts, 0, tmp, 0, parts.length);
+            for (int i = parts.length; i < 8; i++) {
+                tmp[i] = "-";
+            }
+            parts = tmp;
+        }
 
-    /* LineReceiver ---- */
-    public void addFromLine(String s){
-        // id type months status premium
-        String[] p = s.split(" ");
-        Object[] row = new Object[]{
-                Long.parseLong(p[0]),
-                p[1],
-                Integer.parseInt(p[2]),
-                p[3],
-                Double.parseDouble(p[4])
-        };
-        data.add(row);
-        fireTableRowsInserted(data.size()-1,data.size()-1);
+        rows.add(parts);
+        int last = rows.size() - 1;
+        fireTableRowsInserted(last, last);
     }
-    public void clear(){ data.clear(); fireTableDataChanged(); }
+
+    @Override
+    public void clear() {
+        int sz = rows.size();
+        if (sz > 0) {
+            rows.clear();
+            fireTableRowsDeleted(0, sz - 1);
+        }
+    }
+
+    @Override
+    public int getRowCount() {
+        return rows.size();
+    }
+
+    @Override
+    public int getColumnCount() {
+        return columnNames.length;
+    }
+
+    @Override
+    public String getColumnName(int col) {
+        return columnNames[col];
+    }
+
+    @Override
+    public Object getValueAt(int row, int col) {
+        return rows.get(row)[col];
+    }
 }

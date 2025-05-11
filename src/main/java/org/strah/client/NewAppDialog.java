@@ -7,14 +7,13 @@ import javax.swing.*;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.*;
-import java.io.BufferedReader;
-import java.io.PrintWriter;
-import java.time.LocalDate;
 import java.util.*;
 import java.util.List;
 import java.util.stream.Collectors;
 
-class NewAppDialog extends JDialog {
+public class NewAppDialog extends JDialog {
+
+    private static final String SEP = "\u001F";
 
     private final List<InsuranceType> types;
     private final Map<String, List<RiskCoeff>> coeffByType;
@@ -29,45 +28,51 @@ class NewAppDialog extends JDialog {
     private final JLabel lblLimits = new JLabel();
     private final JLabel lblPrem   = new JLabel("–––");
 
-    NewAppDialog(MainFrame parent) {
+    private final JButton btnSend = new JButton("Отправить");
+
+    public NewAppDialog(MainFrame parent) {
         super(parent, "Новая заявка", true);
 
-        // 0. загрузка справочников с сервера
+        // 0. Загрузка справочников
         types       = loadTypes(parent);
         coeffByType = loadCoeffs(parent);
 
-        // 1. комбобокс выбора типа
+        // 1. ComboBox для выбора типа
         cbType = new JComboBox<>(
                 types.stream().map(InsuranceType::getCode).toArray(String[]::new)
         );
-        cbType.addActionListener(e -> rebuildOptions((String)cbType.getSelectedItem()));
+        cbType.addActionListener(e -> rebuildOptions((String) cbType.getSelectedItem()));
 
-        // 2. верстка диалога
+        // 2. Верстка
         setLayout(new GridBagLayout());
         GridBagConstraints c = new GridBagConstraints();
-        c.insets = new Insets(4,4,4,4); c.anchor = GridBagConstraints.WEST;
+        c.insets = new Insets(4,4,4,4);
+        c.anchor = GridBagConstraints.WEST;
 
         addRow(c, 0, "Тип полиса:",    cbType);
         addRow(c, 1, "Срок (мес.):",   spMonths);
-        addRow(c, 2, "Сумма покрытия:",tfCoverage);
+        addRow(c, 2, "Сумма покрытия:", tfCoverage);
         addRow(c, 3, "Базовая ставка:", lblBase);
-        addRow(c, 4, "Лимиты:",         lblLimits);
+        addRow(c, 4, "Лимиты BYN:",     lblLimits);
 
-        c.gridx=0; c.gridy=5; c.gridwidth=2;
+        c.gridx = 0; c.gridy = 5; c.gridwidth = 2;
         add(optionPanel, c);
 
         addRow(c, 6, "Премия BYN:", lblPrem);
 
-        JButton btnSend = new JButton("Отправить");
+        // 3. Кнопка «Отправить»
+        btnSend.setEnabled(false);
         btnSend.addActionListener(e -> submit(parent));
-        c.gridx=0; c.gridy=7; c.gridwidth=2;
+        c.gridx = 0; c.gridy = 7; c.gridwidth = 2;
         add(btnSend, c);
 
-        // live-пересчёт при изменении полей
-        tfCoverage.getDocument().addDocumentListener(new SimpleChange(this::recalc));
-        spMonths.addChangeListener(e -> recalc());
+        // Live-пересчёт и валидация
+        tfCoverage.getDocument().addDocumentListener(new SimpleChange(this::validateAndRecalc));
+        spMonths.addChangeListener(e -> validateAndRecalc());
 
-        rebuildOptions(cbType.getItemAt(0));
+        // Инициализация полей
+        rebuildOptions((String) cbType.getItemAt(0));
+
         pack();
         setLocationRelativeTo(parent);
     }
@@ -75,13 +80,17 @@ class NewAppDialog extends JDialog {
     private List<InsuranceType> loadTypes(MainFrame p) {
         List<InsuranceType> list = new ArrayList<>();
         p.sendSync("INTYPE_LIST", line -> {
-            // code nameRu limitMin limitMax baseMin baseMax defTerm franchise%
-            String[] v = line.split(" ", 8);
+            // делим по SEP, ожидаем 8 полей
+            String[] v = line.split(SEP, 8);
             list.add(new InsuranceType(
-                    v[0], v[1],
-                    Double.parseDouble(v[2]), Double.parseDouble(v[3]),
-                    Double.parseDouble(v[4]), Double.parseDouble(v[5]),
-                    Integer.parseInt(v[6]), Double.parseDouble(v[7])
+                    v[0],              // code
+                    v[1].replace('_',' '), // nameRu
+                    Double.parseDouble(v[2]),
+                    Double.parseDouble(v[3]),
+                    Double.parseDouble(v[4]),
+                    Double.parseDouble(v[5]),
+                    Integer.parseInt(v[6]),
+                    Double.parseDouble(v[7])
             ));
         });
         return list;
@@ -90,10 +99,14 @@ class NewAppDialog extends JDialog {
     private Map<String,List<RiskCoeff>> loadCoeffs(MainFrame p) {
         Map<String,List<RiskCoeff>> map = new HashMap<>();
         p.sendSync("INCOEFF_LIST", line -> {
-            // typeCode group optCode optName kValue
-            String[] v = line.split(" ",5);
+            // делим по SEP, ожидаем 5 полей
+            String[] v = line.split(SEP, 5);
             RiskCoeff rc = new RiskCoeff(
-                    v[0], v[1], v[2], v[3], Double.parseDouble(v[4])
+                    v[0],               // typeCode
+                    v[1],               // group
+                    v[2],               // optionCode
+                    v[3].replace('_',' '), // optionName
+                    Double.parseDouble(v[4])
             );
             map.computeIfAbsent(rc.getTypeCode(), k -> new ArrayList<>()).add(rc);
         });
@@ -104,15 +117,16 @@ class NewAppDialog extends JDialog {
         optionPanel.removeAll();
         comboMap.clear();
 
-        var byGrp = coeffByType.getOrDefault(typeCode, List.of())
-                .stream()
-                .collect(Collectors.groupingBy(RiskCoeff::getGroup));
+        Map<String,List<RiskCoeff>> byGrp = coeffByType.getOrDefault(typeCode, List.of())
+                .stream().collect(Collectors.groupingBy(RiskCoeff::getGroup));
 
         GridBagConstraints c = new GridBagConstraints();
-        c.insets = new Insets(2,2,2,2); c.anchor = GridBagConstraints.WEST;
+        c.insets = new Insets(2,2,2,2);
+        c.anchor = GridBagConstraints.WEST;
+
         int row = 0;
-        for (var e : byGrp.entrySet()) {
-            c.gridx=0; c.gridy=row;
+        for (Map.Entry<String,List<RiskCoeff>> e : byGrp.entrySet()) {
+            c.gridx = 0; c.gridy = row;
             optionPanel.add(new JLabel(e.getKey() + ":"), c);
 
             JComboBox<String> cb = new JComboBox<>(
@@ -120,7 +134,7 @@ class NewAppDialog extends JDialog {
             );
             comboMap.put(e.getKey(), cb);
 
-            c.gridx=1;
+            c.gridx = 1;
             optionPanel.add(cb, c);
             row++;
         }
@@ -131,87 +145,119 @@ class NewAppDialog extends JDialog {
     }
 
     private void updateMeta() {
+        String selectedCode = (String) cbType.getSelectedItem();
+        // Ищем тип по коду
         InsuranceType it = types.stream()
-                .filter(t -> t.getCode().equals(cbType.getSelectedItem()))
-                .findFirst().orElseThrow();
+                .filter(t -> t.getCode().equals(selectedCode))
+                .findFirst()
+                .orElse(null);
 
-        lblBase.setText(String.format("%.4f",
-                (it.getBaseRateMin() + it.getBaseRateMax()) / 2.0));
+        if (it == null) {
+            // Если не нашли — отключаем кнопку и сбрасываем подписи
+            btnSend.setEnabled(false);
+            lblBase.setText("—");
+            lblLimits.setText("—");
+            lblPrem.setText("—");
+            return;
+        }
+
+        // Нашли — показываем данные
+        double avgBase = (it.getBaseRateMin() + it.getBaseRateMax()) / 2.0;
+        lblBase.setText(String.format("%.4f", avgBase));
         lblLimits.setText(String.format("%.0f – %.0f",
                 it.getLimitMin(), it.getLimitMax()));
 
+        // Подставляем дефолтный срок и сразу проверяем/пересчитываем
         spMonths.setValue(it.getDefaultTerm());
-        recalc();
+        validateAndRecalc();
     }
 
-    private void recalc() {
+
+    private void validateAndRecalc() {
+        InsuranceType it;
         try {
-            InsuranceType it = types.stream()
+            it = types.stream()
                     .filter(t -> t.getCode().equals(cbType.getSelectedItem()))
                     .findFirst().orElseThrow();
-
-            double base = (it.getBaseRateMin() + it.getBaseRateMax())/2.0;
-            double cov  = Double.parseDouble(tfCoverage.getText().replace(',','.'));
-
-            int    m    = (Integer) spMonths.getValue();
-            double kTerm= 1.0;  // позже подтянем с сервера
-            double kOpt = 1.0;
-
-            List<RiskCoeff> rcs = coeffByType.get(it.getCode());
-            for (var e : comboMap.entrySet()) {
-                String grp     = e.getKey();
-                String optName = (String)e.getValue().getSelectedItem();
-                kOpt *= rcs.stream()
-                        .filter(rc -> rc.getGroup().equals(grp)
-                                && rc.getOptionName().equals(optName))
-                        .map(RiskCoeff::getValue)
-                        .findFirst().orElse(1.0);
-            }
-            double prem = cov * base * kTerm * kOpt;
-            lblPrem.setText(String.format("%.2f", prem));
         } catch (Exception ex) {
+            btnSend.setEnabled(false);
             lblPrem.setText("–––");
+            return;
         }
+
+        double cov;
+        try {
+            cov = Double.parseDouble(tfCoverage.getText().replace(',', '.'));
+        } catch (NumberFormatException ex) {
+            btnSend.setEnabled(false);
+            lblPrem.setText("Неверный формат");
+            return;
+        }
+
+        double min = it.getLimitMin(), max = it.getLimitMax();
+        if (cov < min || cov > max) {
+            btnSend.setEnabled(false);
+            lblPrem.setText(String.format("Допустимо: %.0f–%.0f", min, max));
+            return;
+        }
+
+        btnSend.setEnabled(true);
+        recalcPremium(it, cov);
+    }
+
+    private void recalcPremium(InsuranceType it, double cov) {
+        double base = (it.getBaseRateMin() + it.getBaseRateMax()) / 2.0;
+        double kTerm = 1.0; // пока заглушка
+        double kOpt  = comboMap.entrySet().stream()
+                .mapToDouble(e -> {
+                    String grp = e.getKey();
+                    String sel = (String)e.getValue().getSelectedItem();
+                    return coeffByType.get(it.getCode()).stream()
+                            .filter(rc -> rc.getGroup().equals(grp) && rc.getOptionName().equals(sel))
+                            .mapToDouble(RiskCoeff::getValue)
+                            .findFirst().orElse(1.0);
+                }).reduce(1.0, (a,b)->a*b);
+
+        double prem = cov * base * kTerm * kOpt;
+        lblPrem.setText(String.format("%.2f", prem));
     }
 
     private void submit(MainFrame p) {
-        String type   = (String)cbType.getSelectedItem();
-        int    months = (Integer)spMonths.getValue();
-        double cov    = Double.parseDouble(tfCoverage.getText().replace(',','.'));
+        String type   = (String) cbType.getSelectedItem();
+        int    months = (Integer) spMonths.getValue();
+        double cov    = Double.parseDouble(tfCoverage.getText().replace(',', '.'));
 
-        // 1) NEWAPP → OK <appId>
         StringBuilder resp = new StringBuilder();
-        p.sendSync(String.format("NEWAPP %s %d %.2f", type, months, cov), resp::append);
+        // Форматируем команду в Locale.US, чтобы получить точку, а не запятую:
+        String cmd = String.format(Locale.US,
+                "NEWAPP %s %d %.2f",
+                type, months, cov
+        );
+        p.sendSync(cmd, resp::append);
         if (!resp.toString().startsWith("OK")) {
-            JOptionPane.showMessageDialog(this, "Сервер: "+resp, "Ошибка", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Сервер: " + resp, "Ошибка", JOptionPane.ERROR_MESSAGE);
             return;
         }
         long appId = Long.parseLong(resp.toString().split(" ")[1]);
-
-        // 2) NEWAPP_ANSWER для каждого коэффициента
-        for (var e : comboMap.entrySet()) {
-            String grp = e.getKey();
-            String opt = e.getValue().getSelectedItem().toString().replace(' ','_');
-            p.sendCommand(
-                    String.format("NEWAPP_ANSWER %d %s %s", appId, grp, opt),
-                    false
-            );
-        }
+        comboMap.forEach((grp, cb) -> {
+            String opt = cb.getSelectedItem().toString().replace(' ', '_');
+            p.sendCommand(String.format("NEWAPP_ANSWER %d %s %s", appId, grp, opt), false);
+        });
 
         p.refreshApplications();
         dispose();
     }
 
     private void addRow(GridBagConstraints c, int y, String lbl, JComponent comp) {
-        c.gridx=0; c.gridy=y; add(new JLabel(lbl), c);
-        c.gridx=1;          add(comp, c);
+        c.gridx = 0; c.gridy = y; add(new JLabel(lbl), c);
+        c.gridx = 1;           add(comp, c);
     }
 
     private static class SimpleChange implements DocumentListener {
         private final Runnable r;
         SimpleChange(Runnable r) { this.r = r; }
         public void insertUpdate(DocumentEvent e) { r.run(); }
-        public void removeUpdate(DocumentEvent e){ r.run(); }
-        public void changedUpdate(DocumentEvent e){ r.run(); }
+        public void removeUpdate(DocumentEvent e) { r.run(); }
+        public void changedUpdate(DocumentEvent e) { r.run(); }
     }
 }

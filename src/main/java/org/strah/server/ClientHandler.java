@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import org.hibernate.Session;
 import org.hibernate.Transaction;
 import org.strah.model.applications.Application;
+import org.strah.model.applications.ApplicationAnswer;
 import org.strah.model.applications.ApplicationStatus;
 import org.strah.model.claims.Claim;
 import org.strah.model.policies.InsurancePolicy;
@@ -26,6 +27,8 @@ import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class ClientHandler extends Thread {
+
+    private static final String SEP = "\u001F";
 
     private final Socket socket;
     private final AuthManager auth = new AuthManager();
@@ -58,8 +61,9 @@ public class ClientHandler extends Thread {
                     case "NEWCLAIM"-> handleNewClaim(args,out);
 
                     /* --- заявки --- */
-                    case "NEWAPP"      -> handleNewApp(args,out);
-                    case "APPLIST"     -> handleAppList(out);
+                    case "NEWAPP"          -> handleNewApp(args, out);
+                    case "NEWAPP_ANSWER"   -> handleNewAppAnswer(args, out);
+                    case "APPLIST"         -> handleAppList(out);
                     case "APPROVE"     -> handleApprove(args,out);
                     case "DECLINE"     -> handleDecline(args,out);
                     case "PAY"         -> handlePay(args,out);
@@ -154,27 +158,31 @@ public class ClientHandler extends Thread {
     /* ---------- CLAIMS ---------- */
     private void handleClaims(PrintWriter out){
         if (notLogged(out)) return;
-
         try (Session s = HibernateUtil.getSessionFactory().openSession()) {
-
             String hql = currentUser.getRoleEnum() == Role.CLIENT
                     ? "from Claim c where c.policy.customer.id = :uid"
                     : "from Claim";
-
             var q = s.createQuery(hql, Claim.class);
-            if (hql.contains(":uid"))
-                q.setParameter("uid", currentUser.getId());
+            if (hql.contains(":uid")) q.setParameter("uid", currentUser.getId());
 
             List<Claim> list = q.list();
-            if (list.isEmpty()) out.println("EMPTY");
-            else for (Claim c : list)
-                out.println(c.getId() + " " +
-                        c.getPolicy().getPolicyNumber() + " " +
-                        c.getAmount() + " " +
-                        c.getStatus());
+            if (list.isEmpty()) {
+                out.println("EMPTY");
+            } else {
+                for (Claim c : list) {
+                    // <id> SEP <policyNumber> SEP <amount> SEP <status>
+                    out.println(
+                            c.getId()               + SEP +
+                                    c.getPolicy().getPolicyNumber() + SEP +
+                                    c.getAmount()           + SEP +
+                                    c.getStatus()
+                    );
+                }
+            }
             out.println("END");
         }
     }
+
 
     /* ---------- NEWCLAIM ---------- */
     private void handleNewClaim(String args, PrintWriter out){
@@ -222,14 +230,24 @@ public class ClientHandler extends Thread {
     /* USERS: login role fullName */
     private void handleUsers(PrintWriter out){
         if(requireAdmin(out)) return;
-        try(Session s=HibernateUtil.getSessionFactory().openSession()){
-            List<AppUser> list=s.createQuery("from AppUser", AppUser.class).list();
-            if(list.isEmpty()) out.println("EMPTY");
-            else for(AppUser u:list)
-                out.println(u.getLogin()+" "+u.getRole()+" "+u.getFullName().replace(' ','_'));
+        try (Session s = HibernateUtil.getSessionFactory().openSession()) {
+            List<AppUser> list = s.createQuery("from AppUser", AppUser.class).list();
+            if (list.isEmpty()) {
+                out.println("EMPTY");
+            } else {
+                for (AppUser u : list) {
+                    // <login> SEP <role> SEP <fullName>
+                    out.println(
+                            u.getLogin()    + SEP +
+                                    u.getRole()     + SEP +
+                                    u.getFullName()
+                    );
+                }
+            }
             out.println("END");
         }
     }
+
 
 
     /* NEWUSER login pass role fullName */
@@ -356,9 +374,13 @@ public class ClientHandler extends Thread {
     }
 
     private void handleNewApp(String args, PrintWriter out) {
-        // args: "typeCode months coverage"
+        // parts: typeCode months coverage
         String[] parts = args.split(" ");
-        if (parts.length != 3) { out.println("ERR Syntax"); return; }
+        if (parts.length != 3) {
+            out.println("ERR Syntax");
+            out.println("END");
+            return;
+        }
 
         String typeCode = parts[0];
         int    months   = Integer.parseInt(parts[1]);
@@ -368,51 +390,81 @@ public class ClientHandler extends Thread {
 
         try (Session s = HibernateUtil.getSessionFactory().openSession()) {
             Transaction tx = s.beginTransaction();
-
-            // создаём заявку
             Application app = new Application(
-                    currentUser.getId(),   // customerId
-                    typeCode,
-                    coverage,
-                    months
+                    currentUser.getId(),
+                    parts[0],
+                    Double.parseDouble(parts[2]),
+                    Integer.parseInt(parts[1])
             );
             s.persist(app);
-
             tx.commit();
             out.println("OK " + app.getId());
+            out.println("END");
+        }
+    }
+
+    /**
+     * Обрабатывает команду NEWAPP_ANSWER <appId> <coeffGroup> <optionCode>
+     */
+    private void handleNewAppAnswer(String args, PrintWriter out) {
+        String[] parts = args.split(" ");
+        if (parts.length != 3) {
+            out.println("ERR Syntax");
+            out.println("END");
+            return;
+        }
+        long   appId      = Long.parseLong(parts[0]);
+        String coeffGroup = parts[1];
+        String optionCode = parts[2];
+
+        try (Session s = HibernateUtil.getSessionFactory().openSession()) {
+            Transaction tx = s.beginTransaction();
+
+            Application app = s.get(Application.class, appId);
+            if (app == null) {
+                out.println("ERR NoApp");
+                out.println("END");
+                return;
+            }
+
+            ApplicationAnswer answer = new ApplicationAnswer(app, coeffGroup, optionCode);
+            s.persist(answer);
+
+            tx.commit();
+            out.println("OK");
+            out.println("END");
         }
     }
 
 
 
-    /** ---------- APPLIST (только свои для клиента, или все для staff) ---------- */
-    private void handleAppList(PrintWriter out) {
-        if (notLogged(out)) return;
 
+    /** ---------- APPLIST (только свои для клиента, или все для staff) ---------- */
+    private void handleAppList(PrintWriter out){
+        if (notLogged(out)) return;
         try (Session s = HibernateUtil.getSessionFactory().openSession()) {
             String hql = currentUser.getRoleEnum() == Role.CLIENT
                     ? "from Application where customerId = :uid"
                     : "from Application";
-
             var q = s.createQuery(hql, Application.class);
-            if (hql.contains(":uid")) {
-                q.setParameter("uid", currentUser.getId());
-            }
+            if (hql.contains(":uid")) q.setParameter("uid", currentUser.getId());
 
             List<Application> apps = q.list();
             if (apps.isEmpty()) {
                 out.println("EMPTY");
             } else {
                 for (Application a : apps) {
-                    out.printf("%d %s %d %.2f %.2f %s %s %s%n",
-                            a.getId(),
-                            a.getTypeCode(),
-                            a.getTermMonths(),
-                            a.getCoverageAmount(),
-                            a.getPremium() != null ? a.getPremium() : 0.0,
-                            a.getStatus().name(),
-                            a.getStartDate() != null ? a.getStartDate().toString() : "-",
-                            a.getEndDate()   != null ? a.getEndDate().toString()   : "-"
+                    // <id> SEP <typeCode> SEP <termMonths> SEP <coverageAmount>
+                    //    SEP <premium> SEP <status> SEP <startDate> SEP <endDate>
+                    out.println(
+                            a.getId()           + SEP +
+                                    a.getTypeCode()     + SEP +
+                                    a.getTermMonths()   + SEP +
+                                    a.getCoverageAmount()+ SEP +
+                                    (a.getPremium()!=null ? a.getPremium() : 0.0) + SEP +
+                                    a.getStatus().name()+ SEP +
+                                    (a.getStartDate()!=null ? a.getStartDate() : "-") + SEP +
+                                    (a.getEndDate()!=null   ? a.getEndDate()   : "-")
                     );
                 }
             }
@@ -582,34 +634,51 @@ public class ClientHandler extends Thread {
     /* ==== передаём справочники клиенту ==== */
     private void streamInsuranceTypes(PrintWriter out) {
         try (Session s = HibernateUtil.getSessionFactory().openSession()) {
-            s.createQuery("from InsuranceType", InsuranceType.class)
-                    .getResultList()
-                    .forEach(t -> out.println(
-                            t.getCode()      + " " +
-                                    t.getBaseRateMin()+ " " +
-                                    t.getDefaultTerm()+ " " +
-                                    t.getLimitMin()  + " " +
-                                    t.getLimitMax()
-                    ));
+            List<InsuranceType> list = s.createQuery("from InsuranceType", InsuranceType.class).list();
+            if (list.isEmpty()) {
+                out.println("EMPTY");
+            } else {
+                for (InsuranceType t : list) {
+                    // <code> SEP <nameRu> SEP <limitMin> SEP <limitMax> SEP <baseMin> SEP <baseMax> SEP <defTerm> SEP <franchisePct>
+                    out.println(
+                            t.getCode()            + SEP +
+                                    t.getNameRu()          + SEP +
+                                    t.getLimitMin()        + SEP +
+                                    t.getLimitMax()        + SEP +
+                                    t.getBaseRateMin()     + SEP +
+                                    t.getBaseRateMax()     + SEP +
+                                    t.getDefaultTerm()     + SEP +
+                                    t.getFranchisePercent()
+                    );
+                }
+            }
             out.println("END");
         }
     }
 
+
     /** Отдаём client’у коэффициенты */
     private void streamRiskCoeffs(PrintWriter out) {
         try (Session s = HibernateUtil.getSessionFactory().openSession()) {
-            s.createQuery("from RiskCoeff", RiskCoeff.class)
-                    .getResultList()
-                    .forEach(rc -> out.println(
-                            rc.getTypeCode()  + " " +
-                                    rc.getGroup()     + " " +
-                                    rc.getOptionCode()+ " " +
-                                    rc.getOptionName()+ " " +
+            List<RiskCoeff> list = s.createQuery("from RiskCoeff", RiskCoeff.class).list();
+            if (list.isEmpty()) {
+                out.println("EMPTY");
+            } else {
+                for (RiskCoeff rc : list) {
+                    // <typeCode> SEP <group> SEP <optionCode> SEP <optionName> SEP <value>
+                    out.println(
+                            rc.getTypeCode()   + SEP +
+                                    rc.getGroup()      + SEP +
+                                    rc.getOptionCode() + SEP +
+                                    rc.getOptionName() + SEP +
                                     rc.getValue()
-                    ));
+                    );
+                }
+            }
             out.println("END");
         }
     }
+
 
 }
 

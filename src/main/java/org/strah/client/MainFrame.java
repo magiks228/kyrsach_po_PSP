@@ -3,12 +3,16 @@ package org.strah.client;
 import javax.swing.*;
 import java.awt.*;
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 public class MainFrame extends JFrame {
+
+    private static final String SEP = "\u001F";
 
     private final String         role;
     private final Socket         socket;
@@ -111,32 +115,57 @@ public class MainFrame extends JFrame {
         request("CLAIMS", claimModel);
     }
 
-    /** универсальный запрос-список */
+
+    /** универсальный запрос-список, теперь всегда дочитывает до "END" */
     private void request(String cmd, LineReceiver model) {
         model.clear();
         try {
             out.println(cmd);
             String l;
-            while (!(l = in.readLine()).equals("END")
-                    && !l.startsWith("ERR") && !l.equals("EMPTY"))
+            boolean sawEmpty = false;
+
+            // Читаем до первой метки END, EMPTY или ERR
+            while ((l = in.readLine()) != null) {
+                if (l.equals("END")) {
+                    break;
+                }
+                if (l.equals("EMPTY")) {
+                    sawEmpty = true;
+                    break;
+                }
+                if (l.startsWith("ERR")) {
+                    JOptionPane.showMessageDialog(this, "Сервер: " + l);
+                    // Продолжаем, но не добавляем в модель
+                    continue;
+                }
                 model.addFromLine(l);
-            if (l.startsWith("ERR"))
-                JOptionPane.showMessageDialog(this, "Сервер: " + l);
-        } catch (Exception ex) {
+            }
+
+            // Если мы вышли по EMPTY — дочитываем до END, чтобы очистить буфер
+            if (sawEmpty) {
+                while ((l = in.readLine()) != null && !l.equals("END")) {
+                    // пропускаем
+                }
+            }
+        } catch (IOException ex) {
             JOptionPane.showMessageDialog(this, "Связь потеряна");
         }
     }
 
     /** sendSync: читаем до OK / ERR / END */
-    public void sendSync(String cmd, java.util.function.Consumer<String> handler) {
+    public void sendSync(String cmd, Consumer<String> handler) {
         out.println(cmd);
         try {
             String l;
             while ((l = in.readLine()) != null) {
-                if ("END".equals(l)) break;
+                if (l.equals("END")) break;
+                if (l.startsWith("ERR")) {
+                    handler.accept(l);
+                    break;
+                }
                 handler.accept(l);
             }
-        } catch (Exception e) {
+        } catch (IOException e) {
             JOptionPane.showMessageDialog(this, "Связь потеряна");
         }
     }
@@ -148,14 +177,16 @@ public class MainFrame extends JFrame {
         try {
             String l;
             while (!(l = in.readLine()).equals("END")) {
-                if (l.startsWith("ERR") || l.startsWith("EMPTY")) break;
-                String[] p = l.split(" ");
-                if (p.length >= 2 && p[1].equals("Клиент"))
+                if (l.startsWith("ERR") || l.equals("EMPTY")) break;
+                // делим по SEP, ожидаем 3 поля: login, role, fullName
+                String[] p = l.split(SEP, 3);
+                if (p[1].equalsIgnoreCase("CLIENT"))
                     list.add(p[0]);
             }
-        } catch (Exception ignored) {}
+        } catch (IOException ignored){}
         return list;
     }
+
 
     /** универсальная команда + опциональный рефреш полисов */
     void sendCommand(String cmd, boolean refreshPolicies) {
