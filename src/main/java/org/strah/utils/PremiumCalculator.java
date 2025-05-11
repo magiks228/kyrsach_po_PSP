@@ -11,33 +11,47 @@ import java.util.stream.Collectors;
 public class PremiumCalculator {
 
     public double calculate(Application app, Session s) {
-        InsuranceType it = s.get(InsuranceType.class,
-                s.createQuery(
-                                "select it.id from InsuranceType it where it.code = :code", Long.class)
-                        .setParameter("code", app.getTypeCode())
-                        .getSingleResult()
-        );
-        double base = it.getBaseRateMin();
-        double kOptions = app.getAnswers().stream()
+        // 1) Тип
+        InsuranceType it = s.createQuery(
+                        "from InsuranceType where code = :c", InsuranceType.class)
+                .setParameter("c", app.getTypeCode())
+                .uniqueResult();
+
+        double base = (it.getBaseRateMin() + it.getBaseRateMax()) / 2.0;
+
+        // 2) Коэффициенты опций
+        double kOpt = app.getAnswers().stream()
                 .mapToDouble(ans -> {
-                    RiskCoeff rc = s.createQuery(
-                                    "from RiskCoeff where typeCode = :tc and group = :g and optionCode = :oc", RiskCoeff.class)
+                    // безопасный запрос (чтобы не падало при отсутствующем rc)
+                    return s.createQuery(
+                                    "from RiskCoeff rc " +
+                                            " where rc.typeCode    = :tc" +
+                                            "   and rc.coeffGroup = :g" +
+                                            "   and rc.optionCode = :oc",
+                                    RiskCoeff.class)
                             .setParameter("tc", app.getTypeCode())
                             .setParameter("g", ans.getCoeffGroup())
                             .setParameter("oc", ans.getOptionCode())
-                            .getSingleResult();
-                    return rc.getValue();
-                }).reduce(1.0, (a,b)->a*b);
+                            .getResultList()
+                            .stream()
+                            .findFirst()
+                            .map(RiskCoeff::getValue)
+                            .orElse(1.0);
+                })
+                .reduce(1.0, (a, b) -> a * b);
 
-        double kFranchise = 1 - it.getFranchisePercent();
+        // 3) Франшиза
+        double kFr = 1.0 - it.getFranchisePercent();
 
-        int months = app.getTermMonths();
+        // 4) Срок
+        int m = app.getTermMonths();
         double kTerm = s.createQuery("from TermCoeff", TermCoeff.class)
                 .getResultList().stream()
-                .filter(t -> t.hit(months))
-                .mapToDouble(TermCoeff::getKValue)
-                .findFirst().orElse(1.0);
+                .filter(t -> t.hit(m))
+                .mapToDouble(TermCoeff::getCoeff)
+                .findFirst()
+                .orElse(1.0);
 
-        return app.getCoverageAmount() * base * kOptions * kTerm * kFranchise;
+        return app.getCoverageAmount() * base * kOpt * kTerm * kFr;
     }
 }

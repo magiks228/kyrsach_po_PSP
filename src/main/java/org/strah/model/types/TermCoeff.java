@@ -3,18 +3,42 @@ package org.strah.model.types;
 import jakarta.persistence.*;
 
 @Entity
-@Table(name = "k_term")
+@Table(name = "term_coeffs")
 public class TermCoeff {
 
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "term_coeff_seq")
+    @SequenceGenerator(
+            name = "term_coeff_seq",
+            sequenceName = "term_coeffs_id_seq",
+            allocationSize = 1
+    )
     private Long id;
 
-    @Column(name="months_from") private int monthsFrom;
-    @Column(name="months_to")   private int monthsTo;
-    @Column(name="k_value")     private double kValue;
+    @Column(name = "month_from", nullable = false)
+    private int monthFrom;
 
-    public TermCoeff() {}         // JPA
+    @Column(name = "month_to", nullable = false)
+    private int monthTo;
 
-    public boolean hit(int m){ return m>=monthsFrom && m<=monthsTo; }
-    public double  getKValue(){ return kValue; }
+    @Column(name = "coeff", nullable = false)
+    private double coeff;
+
+    protected TermCoeff() { }
+
+    public TermCoeff(int monthFrom, int monthTo, double coeff) {
+        this.monthFrom = monthFrom;
+        this.monthTo   = monthTo;
+        this.coeff     = coeff;
+    }
+
+    public Long getId() { return id; }
+    public int getMonthFrom() { return monthFrom; }
+    public int getMonthTo() { return monthTo; }
+    public double getCoeff() { return coeff; }
+
+    /** Для поиска подходящего коэффициента */
+    public boolean hit(int months) {
+        return months >= monthFrom && months <= monthTo;
+    }
 }

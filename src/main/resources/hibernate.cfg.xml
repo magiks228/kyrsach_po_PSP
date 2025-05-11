@@ -36,6 +36,7 @@
         <mapping class="org.strah.model.types.RiskCoeff"/>
         <mapping class="org.strah.model.types.ApplicationTemplate"/>
         <mapping class="org.strah.model.types.RiskCoeffHistory"/>
+        <mapping class="org.strah.model.policies.PaymentSchedule"/>
 
 
     </session-factory>

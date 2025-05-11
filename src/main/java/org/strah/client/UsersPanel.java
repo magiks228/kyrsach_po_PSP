@@ -53,11 +53,8 @@ public class UsersPanel extends JPanel {
                     JOptionPane.showMessageDialog(this, "Сервер: " + line, "Ошибка", JOptionPane.ERROR_MESSAGE);
                     return;
                 }
-                // строка формата: login role full_name_with_underscores
                 String[] parts = line.split(" ", 3);
-                // восстанавливаем пробелы в имени
-                String fullName = parts[2].replace('_',' ');
-                model.addRow(new Object[]{ parts[0], parts[1], fullName });
+                model.addRow(new Object[]{ parts[0], parts[1], parts[2].replace('_',' ') });
             }
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "Связь потеряна", "Ошибка", JOptionPane.ERROR_MESSAGE);

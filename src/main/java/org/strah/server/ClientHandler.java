@@ -230,23 +230,28 @@ public class ClientHandler extends Thread {
     }
 
     /* USERS: login role fullName */
-    private void handleUsers(PrintWriter out){
-        if(requireAdmin(out)) return;
+    private void handleUsers(PrintWriter out) {
+        if (requireAdmin(out)) {
+            out.println("END");    // <--- добавлено
+            return;
+        }
         try (Session s = HibernateUtil.getSessionFactory().openSession()) {
             List<AppUser> list = s.createQuery("from AppUser", AppUser.class).list();
             if (list.isEmpty()) {
                 out.println("EMPTY");
             } else {
                 for (AppUser u : list) {
-                    // <login> SEP <role> SEP <fullName>
                     out.println(
-                            u.getLogin()    + SEP +
-                                    u.getRole()     + SEP +
-                                    u.getFullName()
+                            u.getLogin() + " " +
+                                    u.getRole()  + " " +
+                                    u.getFullName().replace(' ', '_')
                     );
                 }
             }
-            out.println("END");
+        } catch (Exception e) {
+            out.println("ERR " + e.getMessage());
+        } finally {
+            out.println("END");    // <--- гарантируем END
         }
     }
 
@@ -504,6 +509,7 @@ public class ClientHandler extends Thread {
             tx.commit();
 
             out.println("OK");
+            out.println("END");
         }
     }
 
@@ -530,6 +536,7 @@ public class ClientHandler extends Thread {
             tx.commit();
 
             out.println("OK");
+            out.println("END");
         }
     }
 
@@ -572,6 +579,7 @@ public class ClientHandler extends Thread {
             tx.commit();
 
             out.println("OK");
+            out.println("END");
         }
     }
 
@@ -670,7 +678,7 @@ public class ClientHandler extends Thread {
                     // <typeCode> SEP <group> SEP <optionCode> SEP <optionName> SEP <value>
                     out.println(
                             rc.getTypeCode()   + SEP +
-                                    rc.getGroup()      + SEP +
+                                    rc.getCoeffGroup()      + SEP +
                                     rc.getOptionCode() + SEP +
                                     rc.getOptionName() + SEP +
                                     rc.getValue()

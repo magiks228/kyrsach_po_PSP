@@ -118,7 +118,7 @@ public class NewAppDialog extends JDialog {
         comboMap.clear();
 
         Map<String,List<RiskCoeff>> byGrp = coeffByType.getOrDefault(typeCode, List.of())
-                .stream().collect(Collectors.groupingBy(RiskCoeff::getGroup));
+                .stream().collect(Collectors.groupingBy(RiskCoeff::getCoeffGroup));
 
         GridBagConstraints c = new GridBagConstraints();
         c.insets = new Insets(2,2,2,2);
@@ -142,6 +142,7 @@ public class NewAppDialog extends JDialog {
         updateMeta();
         optionPanel.revalidate();
         optionPanel.repaint();
+        pack();
     }
 
     private void updateMeta() {
@@ -213,7 +214,7 @@ public class NewAppDialog extends JDialog {
                     String grp = e.getKey();
                     String sel = (String)e.getValue().getSelectedItem();
                     return coeffByType.get(it.getCode()).stream()
-                            .filter(rc -> rc.getGroup().equals(grp) && rc.getOptionName().equals(sel))
+                            .filter(rc -> rc.getCoeffGroup().equals(grp) && rc.getOptionName().equals(sel))
                             .mapToDouble(RiskCoeff::getValue)
                             .findFirst().orElse(1.0);
                 }).reduce(1.0, (a,b)->a*b);
@@ -244,14 +245,30 @@ public class NewAppDialog extends JDialog {
             p.sendCommand(String.format("NEWAPP_ANSWER %d %s %s", appId, grp, opt), false);
         });
 
-        p.refreshApplications();
         dispose();
+        p.refreshApplications();
     }
 
-    private void addRow(GridBagConstraints c, int y, String lbl, JComponent comp) {
-        c.gridx = 0; c.gridy = y; add(new JLabel(lbl), c);
-        c.gridx = 1;           add(comp, c);
+    private void addRow(GridBagConstraints c, int y, String text, JComponent comp) {
+        // Метка в колонке 0 — не растягиваем
+        c.gridx     = 0;
+        c.gridy     = y;
+        c.gridwidth = 1;
+        c.weightx   = 0;
+        c.fill      = GridBagConstraints.NONE;
+        add(new JLabel(text), c);
+
+        // Компонент в колонке 1 — растягиваем по ширине
+        c.gridx     = 1;
+        c.weightx   = 1.0;
+        c.fill      = GridBagConstraints.HORIZONTAL;
+        add(comp, c);
+
+        // «Сброс» поведения на случай, если где-то дальше вы не переопределите
+        c.fill    = GridBagConstraints.NONE;
+        c.weightx = 0;
     }
+
 
     private static class SimpleChange implements DocumentListener {
         private final Runnable r;

@@ -3,8 +3,10 @@ package org.strah.model.types;
 import jakarta.persistence.*;
 
 @Entity
-@Table(name = "risk_coefficients",
-        uniqueConstraints = @UniqueConstraint(columnNames = {"type_code","coeff_group","option_code"}))
+@Table(
+        name = "risk_coefficients",
+        uniqueConstraints = @UniqueConstraint(columnNames = {"type_code","coeff_group","option_code"})
+)
 public class RiskCoeff {
 
     @Id
@@ -14,8 +16,9 @@ public class RiskCoeff {
     @Column(name = "type_code", length = 20, nullable = false)
     private String typeCode;
 
+    // оставляем только одно поле под coeff_group
     @Column(name = "coeff_group", length = 50, nullable = false)
-    private String group;
+    private String coeffGroup;
 
     @Column(name = "option_code", length = 50, nullable = false)
     private String optionCode;
@@ -30,23 +33,25 @@ public class RiskCoeff {
     protected RiskCoeff() { }
 
     /** Удобный конструктор */
-    public RiskCoeff(String typeCode,
-                     String group,
-                     String optionCode,
-                     String optionName,
-                     double value) {
-        this.typeCode   = typeCode;
-        this.group      = group;
-        this.optionCode = optionCode;
-        this.optionName = optionName;
-        this.value      = value;
+    public RiskCoeff(
+            String typeCode,
+            String coeffGroup,
+            String optionCode,
+            String optionName,
+            double value
+    ) {
+        this.typeCode    = typeCode;
+        this.coeffGroup  = coeffGroup;
+        this.optionCode  = optionCode;
+        this.optionName  = optionName;
+        this.value       = value;
     }
 
     // геттеры
-    public Long   getId()         { return id; }
-    public String getTypeCode()   { return typeCode; }
-    public String getGroup()      { return group; }
-    public String getOptionCode(){ return optionCode; }
-    public String getOptionName(){ return optionName; }
-    public double getValue()      { return value; }
+    public Long   getId()          { return id; }
+    public String getTypeCode()    { return typeCode; }
+    public String getCoeffGroup()  { return coeffGroup; }
+    public String getOptionCode()  { return optionCode; }
+    public String getOptionName()  { return optionName; }
+    public double getValue()       { return value; }
 }
