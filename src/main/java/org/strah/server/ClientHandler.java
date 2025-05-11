@@ -16,6 +16,7 @@ import org.strah.model.types.InsuranceType;
 import org.strah.model.users.Role;
 import org.strah.utils.PremiumCalculator;
 
+
 import java.io.*;
 import java.net.Socket;
 import java.time.LocalDate;
@@ -71,11 +72,8 @@ public class ClientHandler extends Thread {
                     case "DELUSER"   -> handleDelUser(args.trim(),out);
                     case "NEWPOLICY" -> handleNewPolicy(args,out);
 
-                    case "TYPES"  -> streamInsuranceTypes(out);
-                    case "COEFFS" -> streamRiskCoeffs(out);
-
-                    case "INTYPE_LIST"  -> streamInsuranceTypes(out);
-                    case "INCOEFF_LIST" -> streamRiskCoeffs(out);
+                    case "TYPES", "INTYPE_LIST"  -> streamInsuranceTypes(out);
+                    case "COEFFS", "INCOEFF_LIST" -> streamRiskCoeffs(out);
 
 
                     case "EXIT"      -> { out.println("BYE"); socket.close(); return; }
@@ -552,21 +550,33 @@ public class ClientHandler extends Thread {
 
 
     /* ==== передаём справочники клиенту ==== */
-    private void streamInsuranceTypes(PrintWriter out){
-        try(Session s = HibernateUtil.getSessionFactory().openSession()){
+    private void streamInsuranceTypes(PrintWriter out) {
+        try (Session s = HibernateUtil.getSessionFactory().openSession()) {
             s.createQuery("from InsuranceType", InsuranceType.class)
-                    .forEach(t -> out.println(t.getCode()+" "+t.getBaseRateMin()+" "+
-                            t.getDefaultTerm()+" "+
-                            t.getLimitMin()+" "+t.getLimitMax()));
+                    .getResultList()
+                    .forEach(t -> out.println(
+                            t.getCode()      + " " +
+                                    t.getBaseRateMin()+ " " +
+                                    t.getDefaultTerm()+ " " +
+                                    t.getLimitMin()  + " " +
+                                    t.getLimitMax()
+                    ));
             out.println("END");
         }
     }
 
-    private void streamRiskCoeffs(PrintWriter out){
-        try(Session s = HibernateUtil.getSessionFactory().openSession()){
+    /** Отдаём client’у коэффициенты */
+    private void streamRiskCoeffs(PrintWriter out) {
+        try (Session s = HibernateUtil.getSessionFactory().openSession()) {
             s.createQuery("from RiskCoeff", RiskCoeff.class)
-                    .forEach(rc -> out.println(rc.getTypeCode()+" "+rc.getGroup()+" "+
-                            rc.getOptionCode()+" "+rc.getOptionName()+" "+rc.getValue()));
+                    .getResultList()
+                    .forEach(rc -> out.println(
+                            rc.getTypeCode()  + " " +
+                                    rc.getGroup()     + " " +
+                                    rc.getOptionCode()+ " " +
+                                    rc.getOptionName()+ " " +
+                                    rc.getValue()
+                    ));
             out.println("END");
         }
     }

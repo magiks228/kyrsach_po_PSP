@@ -100,7 +100,7 @@ public class MainFrame extends JFrame {
     public void createClaim(String policyNum, double amount, String descr) {
         String cmd = "NEWCLAIM " + policyNum + " " + amount + " " + descr.replace(' ', '_');
         StringBuilder status = new StringBuilder();
-        sendSync(cmd, status);
+        sendSync(cmd, status::append);
 
         if (status.toString().startsWith("OK"))
             JOptionPane.showMessageDialog(this, "Заявка создана");
@@ -108,7 +108,7 @@ public class MainFrame extends JFrame {
             JOptionPane.showMessageDialog(this, "Сервер: " + status,
                     "Ошибка", JOptionPane.ERROR_MESSAGE);
 
-        request("CLAIMS", claimModel);           // обновляем таблицу
+        request("CLAIMS", claimModel);
     }
 
     /** универсальный запрос-список */
@@ -128,15 +128,17 @@ public class MainFrame extends JFrame {
     }
 
     /** sendSync: читаем до OK / ERR / END */
-    public void sendSync(String cmd, java.util.function.Consumer<String> handler){
+    public void sendSync(String cmd, java.util.function.Consumer<String> handler) {
         out.println(cmd);
-        try{
+        try {
             String l;
-            while((l=in.readLine())!=null){
-                if("END".equals(l)) break;
+            while ((l = in.readLine()) != null) {
+                if ("END".equals(l)) break;
                 handler.accept(l);
             }
-        }catch(Exception e){ JOptionPane.showMessageDialog(this,"Связь потеряна"); }
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, "Связь потеряна");
+        }
     }
 
     /** список логинов клиентов (для выпадающего списка) */
@@ -158,12 +160,14 @@ public class MainFrame extends JFrame {
     /** универсальная команда + опциональный рефреш полисов */
     void sendCommand(String cmd, boolean refreshPolicies) {
         StringBuilder st = new StringBuilder();
-        sendSync(cmd, st);
+        sendSync(cmd, st::append);
+
         if (st.toString().startsWith("OK"))
             JOptionPane.showMessageDialog(this, "Успешно");
         else
             JOptionPane.showMessageDialog(this, "Сервер: " + st,
                     "Ошибка", JOptionPane.ERROR_MESSAGE);
+
         if (refreshPolicies) request("POLICIES", policyModel);
     }
 

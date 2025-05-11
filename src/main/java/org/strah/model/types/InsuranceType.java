@@ -2,65 +2,69 @@ package org.strah.model.types;
 
 import jakarta.persistence.*;
 
-/**
- * Cправочник «Виды страхования».
- * Хранит базовые ставки и параметры, которые понадобятся
- * калькулятору премии и фильтрам в GUI.
- */
 @Entity
-@Table(name = "insurance_types")
+@Table(name = "insurance_types",
+        uniqueConstraints = @UniqueConstraint(columnNames = "code"))
 public class InsuranceType {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** короткий код (PROPERTY, BI, GL …) */
-    @Column(length = 20, unique = true, nullable = false)
+    @Column(name="code", length = 20, nullable = false)
     private String code;
 
-    /** русское наименование для вывода в интерфейсе */
-    @Column(name = "name_ru", length = 120, nullable = false)
-    private String name;
+    @Column(name="name_ru", length = 120, nullable = false)
+    private String nameRu;
 
-    /** базовая ставка, минимальная / максимальная */
-    @Column(name = "base_rate_min") private double baseRateMin;
-    @Column(name = "base_rate_max") private double baseRateMax;
+    @Column(name="base_rate_min", nullable = false)
+    private double baseRateMin;
 
-    /** рекомендуемые лимиты ответственности (можно не использовать сейчас) */
-    @Column(name = "limit_min")     private double limitMin;
-    @Column(name = "limit_max")     private double limitMax;
+    @Column(name="base_rate_max", nullable = false)
+    private double baseRateMax;
 
-    /** типичный срок (месяцы) —‑ для шаблонов заявок */
-    @Column(name = "default_term")  private int defaultTerm;
+    @Column(name="limit_min", nullable = false)
+    private double limitMin;
 
+    @Column(name="limit_max", nullable = false)
+    private double limitMax;
 
-    @Column(name = "franchise_pct")      // 0.0‑1.0  (5%  →  0.05)
+    @Column(name="default_term", nullable = false)
+    private int defaultTerm;
+
+    @Column(name="franchise_pct", nullable = false)
     private double franchisePercent;
 
-    // ↓ замените оба конструктора
-    public InsuranceType() {}     // JPA
+    /** JPA-конструктор */
+    protected InsuranceType() { }
 
-    public InsuranceType(String code, String nameRu,
-                         double baseMin, double baseMax,
-                         double limMin, double limMax,
-                         int defTerm, double franchisePercent){
-        this.code = code;   this.name   = nameRu;
-        this.baseRateMin = baseMin;     this.baseRateMax = baseMax;
-        this.limitMin    = limMin;      this.limitMax    = limMax;
-        this.defaultTerm = defTerm;
-        this.franchisePercent = franchisePercent;
+    /** Удобный конструктор */
+    public InsuranceType(String code,
+                         String nameRu,
+                         double limitMin,
+                         double limitMax,
+                         double baseRateMin,
+                         double baseRateMax,
+                         int defaultTerm,
+                         double franchisePercent) {
+        this.code              = code;
+        this.nameRu            = nameRu;
+        this.limitMin          = limitMin;
+        this.limitMax          = limitMax;
+        this.baseRateMin       = baseRateMin;
+        this.baseRateMax       = baseRateMax;
+        this.defaultTerm       = defaultTerm;
+        this.franchisePercent  = franchisePercent;
     }
 
-    /* ---------- геттеры: требуются сервисам/GUI ---------- */
-    public Long   getId()          { return id; }
-    public String getCode()        { return code; }
-    public String getName()        { return name; }
-    public double getBaseRateMin() { return baseRateMin; }
-    public double getBaseRateMax() { return baseRateMax; }
-    public double getLimitMin()    { return limitMin; }
-    public double getLimitMax()    { return limitMax; }
-    public int    getDefaultTerm() { return defaultTerm; }
-
-    @Override public String toString(){ return name; }
+    // геттеры
+    public Long   getId()           { return id; }
+    public String getCode()         { return code; }
+    public String getNameRu()       { return nameRu; }
+    public double getBaseRateMin()  { return baseRateMin; }
+    public double getBaseRateMax()  { return baseRateMax; }
+    public double getLimitMin()     { return limitMin; }
+    public double getLimitMax()     { return limitMax; }
+    public int    getDefaultTerm()  { return defaultTerm; }
+    public double getFranchisePercent() { return franchisePercent; }
 }

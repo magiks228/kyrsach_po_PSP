@@ -9,28 +9,59 @@ import java.util.Objects;
 @IdClass(ApplicationAnswer.PK.class)
 public class ApplicationAnswer {
 
-    public ApplicationAnswer() {} // JPA needs it
+    @Id
+    @Column(name = "app_id")
+    private Long appId;
 
-    @Id @Column(name="app_id")       private Long appId;
-    @Id @Column(name="coeff_group")  private String coeffGroup;
-    @Column(name="option_code")      private String optionCode;
+    @Id
+    @Column(name = "coeff_group", length = 50)
+    private String coeffGroup;
 
-    /* -------- composite PK -------- */
-    @Embeddable
-    public static class PK implements Serializable{
-        private Long   appId;
-        private String coeffGroup;
-        /* equals & hashCode обязательно для PK */
-        @Override public boolean equals(Object o){
-            if(this==o) return true;
-            if(!(o instanceof PK p)) return false;
-            return Objects.equals(appId,p.appId)&&
-                    Objects.equals(coeffGroup,p.coeffGroup);
-        }
-        @Override public int hashCode(){ return Objects.hash(appId,coeffGroup); }
+    @Id
+    @Column(name = "option_code", length = 50)
+    private String optionCode;
+
+    /** JPA-конструктор */
+    protected ApplicationAnswer() { }
+
+    /** Удобный конструктор */
+    public ApplicationAnswer(Application app, String coeffGroup, String optionCode) {
+        this.appId      = app.getId();
+        this.coeffGroup = coeffGroup;
+        this.optionCode = optionCode;
     }
 
-    /* getters */
+    // геттеры
+    public Long getAppId() { return appId; }
     public String getCoeffGroup() { return coeffGroup; }
     public String getOptionCode() { return optionCode; }
+
+    // вложенный класс для composite key
+    public static class PK implements Serializable {
+        private Long appId;
+        private String coeffGroup;
+        private String optionCode;
+
+        public PK() {}
+        public PK(Long appId, String coeffGroup, String optionCode) {
+            this.appId = appId;
+            this.coeffGroup = coeffGroup;
+            this.optionCode = optionCode;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof PK)) return false;
+            PK pk = (PK)o;
+            return Objects.equals(appId, pk.appId)
+                    && Objects.equals(coeffGroup, pk.coeffGroup)
+                    && Objects.equals(optionCode, pk.optionCode);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(appId, coeffGroup, optionCode);
+        }
+    }
 }
