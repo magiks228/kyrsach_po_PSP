@@ -1,67 +1,118 @@
 package org.strah.client;
 
 import javax.swing.*;
+import javax.swing.event.*;
 import java.awt.*;
+import java.io.BufferedReader;
+import java.io.PrintWriter;
+import java.time.LocalDate;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
-/* если уже сделали getAppModel() в MainFrame – импорт не нужен */
 class NewAppDialog extends JDialog {
+
+    /* модель: code → meta‑данные */
+    private final Map<String, Meta> types = new LinkedHashMap<>();
+
+    /* поля формы */
+    private final JComboBox<String> cbType;
+    private final JSpinner spMonths = new JSpinner(new SpinnerNumberModel(6,1,24,1));
+    private final JTextField tfCoverage = new JTextField("1000000",12);
+    private final JLabel lblBase   = new JLabel();
+    private final JLabel lblLimits = new JLabel();
+    private final JLabel lblPrem   = new JLabel("‑‑‑");
+
+    private record Meta(double rate,int term,double limMin,double limMax){}
 
     NewAppDialog(MainFrame parent){
         super(parent,"Новая заявка",true);
         setLayout(new GridBagLayout());
-        GridBagConstraints c = new GridBagConstraints();
-        c.insets = new Insets(4,4,4,4);
-        c.anchor = GridBagConstraints.WEST;
+        GridBagConstraints c=new GridBagConstraints();
+        c.insets=new Insets(4,4,4,4); c.anchor=GridBagConstraints.WEST;
 
-        /* ------ поля формы ------ */
+        /* 1. запрашиваем TYPES */
+        loadTypes(parent);
 
-        JComboBox<String> cbType = new JComboBox<>(new String[]{
-                "PROP    - Property",
-                "BI      - Business Interruption",
-                "GL      - Liability",
-                "E&O     - Errors & Omissions",
-                "PROD    - Product Liability",
-                "CREDIT  - Financial",
-                "CYBER   - Cyber",
-                "CARGO   - Cargo",
-                "D&O     - D&O"
-        });
+        cbType = new JComboBox<>(types.keySet().toArray(new String[0]));
+        cbType.addActionListener(e -> updateMeta());
 
-        /* срок страхования пусть задаётся спиннером */
-        JSpinner spMonths = new JSpinner(new SpinnerNumberModel(6, 1, 24, 1));
+        addRow(c,0,"Тип:",          cbType);
+        addRow(c,1,"Срок (мес.):",  spMonths);
+        addRow(c,2,"Сумма (BYN):",  tfCoverage);
+        addRow(c,3,"Ставка base:",  lblBase);
+        addRow(c,4,"Лимиты:",       lblLimits);
+        addRow(c,5,"Премия:",       lblPrem);
 
-        JTextField tfDescr = new JTextField(15);
-
-        addRow(c,0,"Тип:",        cbType);
-        addRow(c,1,"Срок (мес.):",spMonths);
-        addRow(c,2,"Описание:",   tfDescr);
-
-        /* ------ кнопка --------- */
         JButton btn = new JButton("Отправить");
-        btn.addActionListener(e -> {
+        btn.addActionListener(e -> submit(parent));
+        c.gridx=0; c.gridy=6; c.gridwidth=2; add(btn,c);
 
-            String code   = ((String) cbType.getSelectedItem()).split(" ")[0];
-            int    months = (Integer) spMonths.getValue();
-            String answers = "descr=" + tfDescr.getText().replace(' ', '_');
+        /* live‑пересчёт */
+        tfCoverage.getDocument().addDocumentListener(new SimpleChange(this::recalc));
+        spMonths.addChangeListener(e -> recalc());
 
-            String cmd = String.format("NEWAPP %s %d %s", code, months, answers);
-            parent.sendCommand(cmd, false);
+        updateMeta(); recalc();
+        pack(); setLocationRelativeTo(parent);
+    }
 
-            /* сразу перерисовали таблицу заявок */
-            parent.refreshApplications();
+    /* ===== helpers ===== */
 
-            dispose();
-        });
+    private void loadTypes(MainFrame parent){
+        PrintWriter out = parent.out;
+        BufferedReader in = parent.in;
+        out.println("TYPES");
+        try{
+            String l; while(!(l=in.readLine()).equals("END")){
+                if(l.startsWith("ERR")||l.equals("EMPTY")) break;
+                String[] p=l.split(" ");
+                types.put(p[0],
+                        new Meta(Double.parseDouble(p[1]),
+                                Integer.parseInt(p[2]),
+                                Double.parseDouble(p[3]),
+                                Double.parseDouble(p[4])));
+            }
+        }catch(Exception ex){ JOptionPane.showMessageDialog(this,"Связь потеряна"); }
+    }
 
-        c.gridx=0; c.gridy=3; c.gridwidth=2;
-        add(btn,c);
+    private void updateMeta(){
+        Meta m = types.get(cbType.getSelectedItem());
+        lblBase.setText(String.format("%.4f", m.rate()));
+        lblLimits.setText(String.format("%.0f – %.0f", m.limMin(), m.limMax()));
+        spMonths.setValue(m.term());
+        recalc();
+    }
 
-        pack();
-        setLocationRelativeTo(parent);
+    private void recalc(){
+        try{
+            Meta m = types.get(cbType.getSelectedItem());
+            double cov = Double.parseDouble(tfCoverage.getText());
+            double prem = cov * m.rate() * (double)spMonths.getValue()/12.0;
+            lblPrem.setText(String.format("%.2f", prem));
+        }catch(Exception ignored){ lblPrem.setText("‑‑‑"); }
+    }
+
+    private void submit(MainFrame parent){
+        String code   = (String) cbType.getSelectedItem();
+        int months    = (Integer) spMonths.getValue();
+        String amount = tfCoverage.getText().replace(',','.');
+        String answers= "coverage="+amount;        // примитивно
+
+        parent.sendCommand(String.format("NEWAPP %s %d %s",code,months,answers),false);
+        parent.refreshApplications();
+        dispose();
     }
 
     private void addRow(GridBagConstraints c,int y,String lbl,JComponent comp){
-        c.gridx=0; c.gridy=y; c.gridwidth=1; add(new JLabel(lbl),c);
+        c.gridx=0; c.gridy=y; add(new JLabel(lbl),c);
         c.gridx=1;             add(comp,c);
+    }
+
+    /* удобный DocumentListener */
+    private static class SimpleChange implements DocumentListener{
+        private final Runnable r;
+        SimpleChange(Runnable r){ this.r=r; }
+        public void insertUpdate(DocumentEvent e){ r.run(); }
+        public void removeUpdate(DocumentEvent e){ r.run(); }
+        public void changedUpdate(DocumentEvent e){ r.run(); }
     }
 }

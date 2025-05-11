@@ -69,6 +69,8 @@ public class ClientHandler extends Thread {
                     case "DELUSER"   -> handleDelUser(args.trim(),out);
                     case "NEWPOLICY" -> handleNewPolicy(args,out);
 
+                    case "TYPES" -> handleTypes(out);
+
                     case "EXIT"      -> { out.println("BYE"); socket.close(); return; }
                     default          -> out.println("ERR Unknown");
                 }
@@ -526,6 +528,26 @@ public class ClientHandler extends Thread {
                 Long.class).setParameter("n",num).uniqueResult();
         return cnt!=null && cnt>0;
     }
+
+
+    private void handleTypes(PrintWriter out){
+        try(Session s = HibernateUtil.getSessionFactory().openSession()){
+            List<InsuranceType> list = s.createQuery(
+                    "from InsuranceType", InsuranceType.class).list();
+            if(list.isEmpty()){ out.println("EMPTY"); return; }
+
+            for(InsuranceType t : list){
+                out.printf("%s %.4f %d %.0f %.0f%n",
+                        t.getCode(),
+                        (t.getBaseRateMin()+t.getBaseRateMax())/2.0,
+                        t.getDefaultTerm(),
+                        t.getLimitMin(),
+                        t.getLimitMax());
+            }
+            out.println("END");
+        }
+    }
+
 }
 
 
