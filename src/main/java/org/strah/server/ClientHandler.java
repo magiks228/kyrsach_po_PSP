@@ -355,64 +355,66 @@ public class ClientHandler extends Thread {
         }
     }
 
-    /* ---------- NEWAPP  (клиент) ------------------------------------------*/
-    private void handleNewApp(String args, PrintWriter out){
-        if(notLogged(out)) return;
+    private void handleNewApp(String args, PrintWriter out) {
+        // args: "typeCode months coverage"
+        String[] parts = args.split(" ");
+        if (parts.length != 3) { out.println("ERR Syntax"); return; }
 
-        // EXPECT: NEWAPP <TYPE_CODE> <MONTHS> <field=value;field=value>
-        String[] p = args.split(" ", 3);
-        if(p.length < 3){ out.println("ERR Syntax"); out.println("END"); return; }
+        String typeCode = parts[0];
+        int    months   = Integer.parseInt(parts[1]);
+        double coverage = Double.parseDouble(parts[2]);
 
-        String typeCode = p[0];
-        int    months   = Integer.parseInt(p[1]);
-        String raw      = p[2];
+        if (notLogged(out)) return;
 
-        try(Session s = HibernateUtil.getSessionFactory().openSession()){
-            InsuranceType type = s.createQuery(
-                            "from InsuranceType where code=:c", InsuranceType.class)
-                    .setParameter("c", typeCode).uniqueResult();
-            if(type == null){ out.println("ERR NoType"); out.println("END"); return; }
-
+        try (Session s = HibernateUtil.getSessionFactory().openSession()) {
             Transaction tx = s.beginTransaction();
 
-            Application app = new Application(currentUser, type, months);
-
-            for(String pair : raw.split(";")){
-                int eq = pair.indexOf('=');
-                if(eq > 0){
-                    String f = pair.substring(0, eq);
-                    String v = pair.substring(eq+1);
-                    app.addAnswer(f, v);
-                }
-            }
-
+            // создаём заявку
+            Application app = new Application(
+                    currentUser.getId(),   // customerId
+                    typeCode,
+                    coverage,
+                    months
+            );
             s.persist(app);
-            tx.commit();
 
-            out.println("OK "+app.getId());
+            tx.commit();
+            out.println("OK " + app.getId());
         }
     }
 
 
 
-    /* ---------- APPLIST (own or ALL for staff) ---------- */
-    private void handleAppList(PrintWriter out){
-        if(notLogged(out)) return;
-        try(Session s = HibernateUtil.getSessionFactory().openSession()){
-            String hql = currentUser.getRoleEnum() == Role.CLIENT ?
-                    "from Application a where a.client.id=:uid" :
-                    "from Application a";
-            var q = s.createQuery(hql,Application.class);
-            if(hql.contains(":uid")) q.setParameter("uid",currentUser.getId());
+    /** ---------- APPLIST (только свои для клиента, или все для staff) ---------- */
+    private void handleAppList(PrintWriter out) {
+        if (notLogged(out)) return;
 
-            List<Application> list = q.list();
-            if(list.isEmpty()) out.println("EMPTY");
-            else for (Application a : list) {
-                out.println(a.getId()               +" "+
-                        a.getType().getCode()   +" "+
-                        a.getMonths()           +" "+
-                        a.getStatus()           +" "+
-                        a.getPremium());
+        try (Session s = HibernateUtil.getSessionFactory().openSession()) {
+            String hql = currentUser.getRoleEnum() == Role.CLIENT
+                    ? "from Application where customerId = :uid"
+                    : "from Application";
+
+            var q = s.createQuery(hql, Application.class);
+            if (hql.contains(":uid")) {
+                q.setParameter("uid", currentUser.getId());
+            }
+
+            List<Application> apps = q.list();
+            if (apps.isEmpty()) {
+                out.println("EMPTY");
+            } else {
+                for (Application a : apps) {
+                    out.printf("%d %s %d %.2f %.2f %s %s %s%n",
+                            a.getId(),
+                            a.getTypeCode(),
+                            a.getTermMonths(),
+                            a.getCoverageAmount(),
+                            a.getPremium() != null ? a.getPremium() : 0.0,
+                            a.getStatus().name(),
+                            a.getStartDate() != null ? a.getStartDate().toString() : "-",
+                            a.getEndDate()   != null ? a.getEndDate().toString()   : "-"
+                    );
+                }
             }
             out.println("END");
         }
@@ -420,73 +422,101 @@ public class ClientHandler extends Thread {
 
 
     /* ---------- APPROVE / DECLINE ---------- */
-    private void handleApprove(String id, PrintWriter out){ changeStatus(id, ApplicationStatus.WAIT_PAYMENT, out); }
-    private void handleDecline(String id, PrintWriter out){ changeStatus(id, ApplicationStatus.DECLINED,    out); }
+    private void handleApprove(String id, PrintWriter out) {
+        changeStatus(id, ApplicationStatus.WAIT_PAYMENT, out);
+    }
+    private void handleDecline(String id, PrintWriter out) {
+        changeStatus(id, ApplicationStatus.DECLINED, out);
+    }
 
-    private void changeStatus(String id, ApplicationStatus st, PrintWriter out){
-        if(requireStaff(out)) return;
+    private void changeStatus(String id, ApplicationStatus newStatus, PrintWriter out) {
+        if (requireStaff(out)) return;
         long appId = Long.parseLong(id);
 
-        try(Session s = HibernateUtil.getSessionFactory().openSession()){
-            Application a = s.get(Application.class,appId);
-            if(a==null){ out.println("ERR NoApp"); return; }
-
-            Transaction tx=s.beginTransaction();
-            if(st == ApplicationStatus.WAIT_PAYMENT){
-                double prem = new PremiumCalculator(s).calc(a);
-                a.setPremium(prem);
+        try (Session s = HibernateUtil.getSessionFactory().openSession()) {
+            Application app = s.get(Application.class, appId);
+            if (app == null) {
+                out.println("ERR NoApp");
+                return;
             }
-            a.setStatus(st); tx.commit();
+
+            Transaction tx = s.beginTransaction();
+            // при переходе в ожидание оплаты пересчитываем премию
+            if (newStatus == ApplicationStatus.WAIT_PAYMENT) {
+                double recalculated = new PremiumCalculator().calculate(app, s);
+                app.setPremium(recalculated);
+            }
+            app.setStatus(newStatus);
+            tx.commit();
+
             out.println("OK");
         }
     }
 
-    /* --- оплата клиентом --- */
-    private void handlePay(String id, PrintWriter out){
-        if(notLogged(out)) return;
+
+    /** --- оплата клиентом --- */
+    private void handlePay(String id, PrintWriter out) {
+        if (notLogged(out)) return;
         long appId = Long.parseLong(id);
 
-        try(Session s = HibernateUtil.getSessionFactory().openSession()){
-            Application a = s.get(Application.class,appId);
-            if(a==null || !a.getClient().getId().equals(currentUser.getId())){
-                out.println("ERR NoApp"); return;
+        try (Session s = HibernateUtil.getSessionFactory().openSession()) {
+            Application app = s.get(Application.class, appId);
+            if (app == null || !app.getCustomerId().equals(currentUser.getId())) {
+                out.println("ERR NoApp");
+                return;
             }
-            if(a.getStatus()!=ApplicationStatus.WAIT_PAYMENT){
-                out.println("ERR BadStatus"); return;
+            // здесь проверяем именно ApplicationStatus.WAIT_PAYMENT
+            if (app.getStatus() != ApplicationStatus.WAIT_PAYMENT) {
+                out.println("ERR BadStatus");
+                return;
             }
-            Transaction tx=s.beginTransaction();
-            a.setStatus(ApplicationStatus.PAID); tx.commit();
+
+            Transaction tx = s.beginTransaction();
+            app.setStatus(ApplicationStatus.PAID);
+            tx.commit();
+
             out.println("OK");
         }
     }
 
-    /* --- выпуск полиса из оплаченной заявки --- */
-    private void handlePolicyFromApp(String args, PrintWriter out){
-        if(requireStaff(out)) return;
+    /** --- выпуск полиса из оплаченной заявки --- */
+    private void handlePolicyFromApp(String args, PrintWriter out) {
+        if (requireStaff(out)) return;
         String[] a = args.split(" ");
-        if(a.length!=3){ out.println("ERR Syntax"); return; }
-        long appId = Long.parseLong(a[0]);
-        LocalDate start = LocalDate.parse(a[1],DF);
-        LocalDate end   = LocalDate.parse(a[2],DF);
+        if (a.length != 3) { out.println("ERR Syntax"); return; }
 
-        try(Session s = HibernateUtil.getSessionFactory().openSession()){
-            Application app = s.get(Application.class,appId);
-            if(app==null){ out.println("ERR NoApp"); return; }
-            if(app.getStatus()!=ApplicationStatus.PAID){
+        long appId = Long.parseLong(a[0]);
+        LocalDate start = LocalDate.parse(a[1], DF);
+        LocalDate end   = LocalDate.parse(a[2], DF);
+
+        try (Session s = HibernateUtil.getSessionFactory().openSession()) {
+            Application app = s.get(Application.class, appId);
+            if (app == null) { out.println("ERR NoApp"); return; }
+            if (app.getStatus() != ApplicationStatus.PAID) {
                 out.println("ERR NotPaid"); return;
             }
-            String num = app.getType().getCode() + "-" +
-                    LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + "-" +
-                    String.format("%04d",
-                            ThreadLocalRandom.current().nextInt(10_000));
 
-            Transaction tx=s.beginTransaction();
+            // получаем тип и клиента
+            InsuranceType type = s.createQuery(
+                            "from InsuranceType where code = :c", InsuranceType.class)
+                    .setParameter("c", app.getTypeCode())
+                    .uniqueResult();
+            AppUser client = s.get(AppUser.class, app.getCustomerId());
+
+            // генерируем номер
+            String num = type.getCode() + "-" +
+                    LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + "-" +
+                    String.format("%04d", ThreadLocalRandom.current().nextInt(10_000));
+
+            Transaction tx = s.beginTransaction();
             InsurancePolicy pol = new StandardPolicy(
-                    num,start,end,app.getPremium(),
-                    app.getClient(), app.getType());
+                    num, start, end, app.getPremium(), client, type
+            );
             pol.setApplication(app);
             app.setStatus(ApplicationStatus.FINISHED);
-            s.persist(pol); tx.commit();
+            s.persist(pol);
+            tx.commit();
+
             out.println("OK");
         }
     }
@@ -503,7 +533,7 @@ public class ClientHandler extends Thread {
     /* ======== расчёт премии через коэффициенты ======== */
     private double calcPremium(Application a){
         try(Session s = HibernateUtil.getSessionFactory().openSession()){
-            return new PremiumCalculator(s).calc(a);
+            return new PremiumCalculator().calculate(a, s);
         }
     }
 
