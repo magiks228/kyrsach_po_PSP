@@ -1,41 +1,36 @@
 package org.strah.model.applications;
 
 import jakarta.persistence.*;
+import java.io.Serializable;
+import java.util.Objects;
 
 @Entity
 @Table(name = "application_answers")
+@IdClass(ApplicationAnswer.PK.class)
 public class ApplicationAnswer {
 
-    @Id @GeneratedValue
-    private Long id;
+    public ApplicationAnswer() {} // JPA needs it
 
-    /* FK → applications.id */
-    @ManyToOne(optional = false)
-    @JoinColumn(name = "application_id")
-    private Application application;
+    @Id @Column(name="app_id")       private Long appId;
+    @Id @Column(name="coeff_group")  private String coeffGroup;
+    @Column(name="option_code")      private String optionCode;
 
-    /* ====== изменения только здесь  ====== */
-    /** ключ анкеты (колонка `field` в БД)  */
-    @Column(name = "field", length = 100, nullable = false)
-    private String fieldCode;
-
-    /** введённое значение (колонка `value` в БД) */
-    @Column(name = "value", length = 500, nullable = false)
-    private String fieldValue;
-    /* ====================================== */
-
-    public ApplicationAnswer() {}             // Hibernate
-
-    public ApplicationAnswer(Application app,
-                             String field, String value) {
-        this.application = app;
-        this.fieldCode   = field;
-        this.fieldValue  = value;
+    /* -------- composite PK -------- */
+    @Embeddable
+    public static class PK implements Serializable{
+        private Long   appId;
+        private String coeffGroup;
+        /* equals & hashCode обязательно для PK */
+        @Override public boolean equals(Object o){
+            if(this==o) return true;
+            if(!(o instanceof PK p)) return false;
+            return Objects.equals(appId,p.appId)&&
+                    Objects.equals(coeffGroup,p.coeffGroup);
+        }
+        @Override public int hashCode(){ return Objects.hash(appId,coeffGroup); }
     }
 
     /* getters */
-    public Long        getId()        { return id; }
-    public String      getFieldCode() { return fieldCode; }
-    public String      getFieldValue(){ return fieldValue; }
-    public Application getApplication(){ return application; }
+    public String getCoeffGroup() { return coeffGroup; }
+    public String getOptionCode() { return optionCode; }
 }

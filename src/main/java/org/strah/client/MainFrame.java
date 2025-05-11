@@ -128,19 +128,15 @@ public class MainFrame extends JFrame {
     }
 
     /** sendSync: читаем до OK / ERR / END */
-    private void sendSync(String cmd, StringBuilder status) {
+    public void sendSync(String cmd, java.util.function.Consumer<String> handler){
         out.println(cmd);
-        try {
+        try{
             String l;
-            while ((l = in.readLine()) != null) {
-                if (l.equals("END") || l.startsWith("OK") || l.startsWith("ERR") || l.equals("EMPTY")) {
-                    status.append(l);
-                    break;
-                }
+            while((l=in.readLine())!=null){
+                if("END".equals(l)) break;
+                handler.accept(l);
             }
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(this, "Связь потеряна");
-        }
+        }catch(Exception e){ JOptionPane.showMessageDialog(this,"Связь потеряна"); }
     }
 
     /** список логинов клиентов (для выпадающего списка) */
@@ -175,6 +171,7 @@ public class MainFrame extends JFrame {
     interface LineReceiver { void addFromLine(String s); void clear(); }
 
     /* === геттеры для диалогов === */
-    PrintWriter    getWriter(){ return out; }
-    BufferedReader getReader(){ return in; }
+    public PrintWriter    getWriter(){ return out; }
+    public BufferedReader getReader(){ return in; }
+
 }

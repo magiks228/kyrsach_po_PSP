@@ -6,6 +6,8 @@ import org.strah.model.applications.Application;
 import org.strah.model.claims.Claim;
 import org.strah.model.policies.*;
 import org.strah.model.types.InsuranceType;
+import org.strah.model.types.RiskCoeff;
+import org.strah.model.types.TermCoeff;
 import org.strah.model.users.AppUser;
 
 public class HibernateUtil {
@@ -28,7 +30,9 @@ public class HibernateUtil {
                     .addAnnotatedClass(org.strah.model.types.ApplicationTemplate.class)
                     .addAnnotatedClass(org.strah.model.types.RiskCoeffHistory.class)
                     .addAnnotatedClass(org.strah.model.applications.Application.class)
-                    .addAnnotatedClass(org.strah.model.applications.ApplicationAnswer.class);
+                    .addAnnotatedClass(org.strah.model.applications.ApplicationAnswer.class)
+                    .addAnnotatedClass(RiskCoeff.class)
+                    .addAnnotatedClass(TermCoeff.class);
 
             return cfg.buildSessionFactory();
         } catch (Throwable ex) {

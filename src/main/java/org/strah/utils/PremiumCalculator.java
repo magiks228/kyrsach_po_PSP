@@ -2,32 +2,53 @@ package org.strah.utils;
 
 import org.hibernate.Session;
 import org.strah.model.applications.Application;
-import org.strah.model.types.RiskCoeff;
-import org.strah.utils.HibernateUtil;
+import org.strah.model.applications.ApplicationAnswer;
+import org.strah.model.types.*;
 
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 public class PremiumCalculator {
 
-    /**
-     * @param app        заявка
-     * @param overrides  ручные изменения: код‑>значение (может быть пустым)
-     */
-    public double calculate(Application app, Map<String, Double> overrides){
-        try (Session s = HibernateUtil.getSessionFactory().openSession()) {
-            List<RiskCoeff> coeffs = s.createQuery(
-                            "from RiskCoeff c where c.type.id = :tid", RiskCoeff.class)
-                    .setParameter("tid", app.getType().getId())
-                    .list();
+    private final Session s;
+    public PremiumCalculator(Session s){ this.s = s; }
 
-            double kProduct = 1.0;
-            for (RiskCoeff rc : coeffs) {
-                double k = overrides.getOrDefault(rc.getCode(), rc.getValue());
-                kProduct *= k;
-            }
-            double base = app.getType().getBaseRateMin();      // пока min‑ставка
-            return base * kProduct * app.getMonths() / 12.0;
+    public double calc(Application app){
+        double coverage   = app.getCoverageAmount();   // поле добавлено в Application
+        InsuranceType it  = app.getType();
+
+        /* 1. базовая ставка */
+        double base = (it.getBaseRateMin()+it.getBaseRateMax())/2.0;
+
+        /* 2. коэффициенты по ответам клиента */
+        Map<String,String> answers = s.createQuery(
+                        "from ApplicationAnswer where application.id=:id",ApplicationAnswer.class)
+                .setParameter("id", app.getId())
+                .stream()
+                .collect(Collectors.toMap(ApplicationAnswer::getCoeffGroup,
+                        ApplicationAnswer::getOptionCode));
+
+        double kOptions = 1.0;
+        if(!answers.isEmpty()){
+            List<RiskCoeff> list = s.createQuery(
+                            "from RiskCoeff where typeCode=:c and group in (:g)", RiskCoeff.class)
+                    .setParameter("c", it.getCode())
+                    .setParameterList("g", answers.keySet())
+                    .list();
+            for(RiskCoeff rc: list)
+                if(answers.get(rc.getGroup()).equals(rc.getOptionCode()))
+                    kOptions *= rc.getValue();
         }
+
+        /* 3. K_TERM */
+        int m = app.getMonths();
+        double kTerm = s.createQuery("from TermCoeff", TermCoeff.class)
+                .stream().filter(t->t.hit(m))
+                .map(TermCoeff::getKValue).findFirst().orElse(1.0);
+
+        /* 4. франшиза */
+        double kFranchise = 1 - it.getFranchisePercent();
+
+        return coverage * base * kOptions * kTerm * kFranchise;
     }
 }

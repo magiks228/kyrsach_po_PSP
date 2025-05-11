@@ -8,6 +8,7 @@ import org.strah.model.applications.ApplicationStatus;
 import org.strah.model.claims.Claim;
 import org.strah.model.policies.InsurancePolicy;
 import org.strah.model.policies.StandardPolicy;
+import org.strah.model.types.RiskCoeff;
 import org.strah.model.users.AppUser;
 import org.strah.utils.AuthManager;
 import org.strah.utils.HibernateUtil;
@@ -21,6 +22,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class ClientHandler extends Thread {
 
@@ -69,7 +71,12 @@ public class ClientHandler extends Thread {
                     case "DELUSER"   -> handleDelUser(args.trim(),out);
                     case "NEWPOLICY" -> handleNewPolicy(args,out);
 
-                    case "TYPES" -> handleTypes(out);
+                    case "TYPES"  -> streamInsuranceTypes(out);
+                    case "COEFFS" -> streamRiskCoeffs(out);
+
+                    case "INTYPE_LIST"  -> streamInsuranceTypes(out);
+                    case "INCOEFF_LIST" -> streamRiskCoeffs(out);
+
 
                     case "EXIT"      -> { out.println("BYE"); socket.close(); return; }
                     default          -> out.println("ERR Unknown");
@@ -428,7 +435,7 @@ public class ClientHandler extends Thread {
 
             Transaction tx=s.beginTransaction();
             if(st == ApplicationStatus.WAIT_PAYMENT){
-                double prem = new PremiumCalculator().calculate(a, Map.of());
+                double prem = new PremiumCalculator(s).calc(a);
                 a.setPremium(prem);
             }
             a.setStatus(st); tx.commit();
@@ -470,7 +477,10 @@ public class ClientHandler extends Thread {
             if(app.getStatus()!=ApplicationStatus.PAID){
                 out.println("ERR NotPaid"); return;
             }
-            String num = "POL-"+System.nanoTime()%1_000_000;
+            String num = app.getType().getCode() + "-" +
+                    LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + "-" +
+                    String.format("%04d",
+                            ThreadLocalRandom.current().nextInt(10_000));
 
             Transaction tx=s.beginTransaction();
             InsurancePolicy pol = new StandardPolicy(
@@ -492,18 +502,10 @@ public class ClientHandler extends Thread {
         return true;
     }
 
-    /* ======== расчёт премии через RiskCoeff ======== */
+    /* ======== расчёт премии через коэффициенты ======== */
     private double calcPremium(Application a){
         try(Session s = HibernateUtil.getSessionFactory().openSession()){
-            List<Double> coeffs = s.createQuery(
-                            "select r.value from RiskCoeff r where r.type.id = :id",
-                            Double.class)
-                    .setParameter("id", a.getType().getId())
-                    .list();
-
-            double kTotal = coeffs.stream().reduce(1d, (x, y) -> x * y);
-            double base   = a.getType().getBaseRateMin();
-            return base * kTotal * a.getMonths() / 12.0;
+            return new PremiumCalculator(s).calc(a);
         }
     }
 
@@ -544,6 +546,27 @@ public class ClientHandler extends Thread {
                         t.getLimitMin(),
                         t.getLimitMax());
             }
+            out.println("END");
+        }
+    }
+
+
+    /* ==== передаём справочники клиенту ==== */
+    private void streamInsuranceTypes(PrintWriter out){
+        try(Session s = HibernateUtil.getSessionFactory().openSession()){
+            s.createQuery("from InsuranceType", InsuranceType.class)
+                    .forEach(t -> out.println(t.getCode()+" "+t.getBaseRateMin()+" "+
+                            t.getDefaultTerm()+" "+
+                            t.getLimitMin()+" "+t.getLimitMax()));
+            out.println("END");
+        }
+    }
+
+    private void streamRiskCoeffs(PrintWriter out){
+        try(Session s = HibernateUtil.getSessionFactory().openSession()){
+            s.createQuery("from RiskCoeff", RiskCoeff.class)
+                    .forEach(rc -> out.println(rc.getTypeCode()+" "+rc.getGroup()+" "+
+                            rc.getOptionCode()+" "+rc.getOptionName()+" "+rc.getValue()));
             out.println("END");
         }
     }

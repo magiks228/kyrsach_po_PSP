@@ -34,15 +34,22 @@ public class InsuranceType {
     /** типичный срок (месяцы) —‑ для шаблонов заявок */
     @Column(name = "default_term")  private int defaultTerm;
 
-    /* ---------- конструкторы ---------- */
-    public InsuranceType() {}           // Hibernate
-    public InsuranceType(String code, String name,
+
+    @Column(name = "franchise_pct")      // 0.0‑1.0  (5%  →  0.05)
+    private double franchisePercent;
+
+    // ↓ замените оба конструктора
+    public InsuranceType() {}     // JPA
+
+    public InsuranceType(String code, String nameRu,
                          double baseMin, double baseMax,
-                         double limMin, double limMax, int term){
-        this.code = code; this.name = name;
-        this.baseRateMin  = baseMin;  this.baseRateMax = baseMax;
-        this.limitMin     = limMin;   this.limitMax    = limMax;
-        this.defaultTerm  = term;
+                         double limMin, double limMax,
+                         int defTerm, double franchisePercent){
+        this.code = code;   this.name   = nameRu;
+        this.baseRateMin = baseMin;     this.baseRateMax = baseMax;
+        this.limitMin    = limMin;      this.limitMax    = limMax;
+        this.defaultTerm = defTerm;
+        this.franchisePercent = franchisePercent;
     }
 
     /* ---------- геттеры: требуются сервисам/GUI ---------- */

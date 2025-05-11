@@ -33,6 +33,9 @@ public class Application {
             orphanRemoval = true)
     private List<ApplicationAnswer> answers = new ArrayList<>();
 
+    @Column(name="coverage_amount") private double coverageAmount;
+    public double getCoverageAmount(){ return coverageAmount; }
+
     /* удобный helper */
     public void addAnswer(String field, String value){
         ApplicationAnswer aa = new ApplicationAnswer(this, field, value);

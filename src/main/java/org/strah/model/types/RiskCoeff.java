@@ -3,29 +3,32 @@ package org.strah.model.types;
 import jakarta.persistence.*;
 
 @Entity
-@Table(name = "risk_coeffs",
-        uniqueConstraints = @UniqueConstraint(columnNames = {"type_id","code"}))
+@Table(name = "risk_coefficients",
+        uniqueConstraints = @UniqueConstraint(columnNames = {
+                "type_code","coeff_group","option_code"}))
 public class RiskCoeff {
+
+    // + пустой конструктор
+    public RiskCoeff() {}   // JPA
+
 
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(optional = false)
-    private InsuranceType type;
+    @Column(name = "type_code",     nullable = false) private String typeCode;
+    @Column(name = "coeff_group",   nullable = false) private String group;
+    @Column(name = "option_code",   nullable = false) private String optionCode;
+    @Column(name = "option_name",   nullable = false) private String optionName;
 
-    /** Код коэффициента: K_region, K_security … */
-    @Column(nullable = false, length = 64)
-    private String code;
+    @Column(name = "k_value",       nullable = false) private double value;
 
-    private double value;
+    /* -------- getters ---------- */
+    public String getTypeCode()   { return typeCode; }
+    public String getGroup()      { return group; }
+    public String getOptionCode() { return optionCode; }
+    public double getValue()      { return value; }
 
-    /* === getters === */
-    public InsuranceType getType() { return type; }
-    public String getCode()        { return code; }
-    public double getValue()       { return value; }
+    public String getOptionName(){ return optionName; }
+    public String getCoeffGroup(){ return group; }
 
-    /* === setters === */
-    public void setType (InsuranceType t){ this.type = t; }
-    public void setCode (String c)      { this.code = c; }
-    public void setValue(double v)      { this.value = v; }
 }

@@ -1,113 +1,223 @@
 package org.strah.client;
 
-import javax.swing.*;
-import javax.swing.event.*;
-import java.awt.*;
-import java.io.BufferedReader;
-import java.io.PrintWriter;
-import java.time.LocalDate;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import org.strah.model.types.InsuranceType;
+import org.strah.model.types.RiskCoeff;
 
+import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import java.awt.*;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.*;
+import java.util.stream.Collectors;
+
+/**
+ * Диалог «Новая заявка на страхование».
+ *
+ * 1.  Загружает insurance_types + risk_coefficients с сервера.
+ * 2.  Показывает набор динамических ComboBox‑ов по группам коэффициентов.
+ * 3.  Валидирует лимиты, считает премию в режиме real‑time.
+ * 4.  Посылает:  NEWAPP  +  NEWAPP_ANSWER  (по каждому выбранному опциону).
+ */
 class NewAppDialog extends JDialog {
 
-    /* модель: code → meta‑данные */
-    private final Map<String, Meta> types = new LinkedHashMap<>();
+    /* ‑‑‑ кешированные справочники ‑‑‑ */
+    private final List<InsuranceType>                   types;
+    private final Map<String, List<RiskCoeff>>          coeffByType;
+
+    /* динамические Combo “группа → выбранный option_code” */
+    private final Map<String, JComboBox<String>> comboMap = new HashMap<>();
+    private final JPanel optionPanel = new JPanel(new GridBagLayout());
 
     /* поля формы */
     private final JComboBox<String> cbType;
-    private final JSpinner spMonths = new JSpinner(new SpinnerNumberModel(6,1,24,1));
-    private final JTextField tfCoverage = new JTextField("1000000",12);
-    private final JLabel lblBase   = new JLabel();
-    private final JLabel lblLimits = new JLabel();
-    private final JLabel lblPrem   = new JLabel("‑‑‑");
+    private final JSpinner spMonths = new JSpinner(new SpinnerNumberModel(6, 1, 24, 1));
+    private final JTextField tfCoverage = new JTextField("1000000", 12);
 
-    private record Meta(double rate,int term,double limMin,double limMax){}
+    private final JLabel lblBase   = new JLabel();     // базовая ставка
+    private final JLabel lblLimits = new JLabel();     // мин / макс лимит
+    private final JLabel lblPrem   = new JLabel("‑‑‑"); // рассчитанная премия BYN
 
-    NewAppDialog(MainFrame parent){
-        super(parent,"Новая заявка",true);
+    /* === КОНСТРУКТОР ===================================================== */
+    NewAppDialog(MainFrame parent) {
+        super(parent, "Новая заявка", true);
+
+        /* 0. Справочники */
+        types       = loadTypes(parent);
+        coeffByType = loadCoeffs(parent);
+
+        /* 1. Вид полиса */
+        cbType = new JComboBox<>(
+                types.stream().map(InsuranceType::getCode).toArray(String[]::new));
+        cbType.addActionListener(e ->
+                rebuildOptions((String) cbType.getSelectedItem()));
+
+        /* 2. Макет */
         setLayout(new GridBagLayout());
-        GridBagConstraints c=new GridBagConstraints();
-        c.insets=new Insets(4,4,4,4); c.anchor=GridBagConstraints.WEST;
+        GridBagConstraints c = new GridBagConstraints();
+        c.insets = new Insets(4,4,4,4); c.anchor = GridBagConstraints.WEST;
 
-        /* 1. запрашиваем TYPES */
-        loadTypes(parent);
+        addRow(c,0,"Тип полиса:", cbType);
+        addRow(c,1,"Срок (мес.):", spMonths);
+        addRow(c,2,"Сумма покрытия:", tfCoverage);
+        addRow(c,3,"Базовая ставка:", lblBase);
+        addRow(c,4,"Лимиты:", lblLimits);
 
-        cbType = new JComboBox<>(types.keySet().toArray(new String[0]));
-        cbType.addActionListener(e -> updateMeta());
+        /* панель с коэффициентами */
+        c.gridx=0; c.gridy=5; c.gridwidth=2; add(optionPanel,c);
 
-        addRow(c,0,"Тип:",          cbType);
-        addRow(c,1,"Срок (мес.):",  spMonths);
-        addRow(c,2,"Сумма (BYN):",  tfCoverage);
-        addRow(c,3,"Ставка base:",  lblBase);
-        addRow(c,4,"Лимиты:",       lblLimits);
-        addRow(c,5,"Премия:",       lblPrem);
+        addRow(c,6,"Премия:", lblPrem);
 
-        JButton btn = new JButton("Отправить");
-        btn.addActionListener(e -> submit(parent));
-        c.gridx=0; c.gridy=6; c.gridwidth=2; add(btn,c);
+        /* 3. Кнопка отправки */
+        JButton btnSend = new JButton("Отправить");
+        btnSend.addActionListener(e -> submit(parent));
+        c.gridx=0; c.gridy=7; c.gridwidth=2; add(btnSend,c);
 
         /* live‑пересчёт */
         tfCoverage.getDocument().addDocumentListener(new SimpleChange(this::recalc));
         spMonths.addChangeListener(e -> recalc());
 
-        updateMeta(); recalc();
+        /* первичная инициализация */
+        rebuildOptions(cbType.getItemAt(0));
         pack(); setLocationRelativeTo(parent);
     }
 
-    /* ===== helpers ===== */
+    /* === СПРАВОЧНИКИ С СЕРВЕРА ========================================== */
+    private List<InsuranceType> loadTypes(MainFrame p){
+        List<InsuranceType> list = new ArrayList<>();
+        p.sendSync("INTYPE_LIST", line -> {
+            // code nameRu limitMin limitMax baseMin baseMax defTerm franchise%
+            String[] v = line.split(" ",8);
+            list.add(new InsuranceType(
+                    v[0],v[1],
+                    Double.parseDouble(v[2]),Double.parseDouble(v[3]),
+                    Double.parseDouble(v[4]),Double.parseDouble(v[5]),
+                    Integer.parseInt(v[6]), Double.parseDouble(v[7])));
+        });
+        return list;
+    }
 
-    private void loadTypes(MainFrame parent){
-        PrintWriter out = parent.getWriter();
-        BufferedReader in = parent.getReader();
-        out.println("TYPES");
-        try{
-            String l; while(!(l=in.readLine()).equals("END")){
-                if(l.startsWith("ERR")||l.equals("EMPTY")) break;
-                String[] p=l.split(" ");
-                types.put(p[0],
-                        new Meta(Double.parseDouble(p[1]),
-                                Integer.parseInt(p[2]),
-                                Double.parseDouble(p[3]),
-                                Double.parseDouble(p[4])));
-            }
-        }catch(Exception ex){ JOptionPane.showMessageDialog(this,"Связь потеряна"); }
+    private Map<String,List<RiskCoeff>> loadCoeffs(MainFrame p){
+        Map<String,List<RiskCoeff>> map = new HashMap<>();
+        p.sendSync("INCOEFF_LIST", line -> {
+            // typeCode group optCode optName kValue
+            String[] v = line.split(" ",5);
+            RiskCoeff rc = new RiskCoeff(v[0],v[1],v[2],v[3],Double.parseDouble(v[4]));
+            map.computeIfAbsent(rc.getTypeCode(),k->new ArrayList<>()).add(rc);
+        });
+        return map;
+    }
+
+    /* === ДИНАМИЧЕСКИЕ ПАРАМЕТРЫ ======================================== */
+    private void rebuildOptions(String typeCode){
+        optionPanel.removeAll(); comboMap.clear();
+
+        Map<String, List<RiskCoeff>> byGrp =
+                coeffByType.getOrDefault(typeCode, List.of())
+                        .stream()
+                        .collect(Collectors.groupingBy(RiskCoeff::getGroup));
+
+        GridBagConstraints c = new GridBagConstraints();
+        c.insets=new Insets(2,2,2,2); c.anchor=GridBagConstraints.WEST;
+        int row=0;
+        for(var e: byGrp.entrySet()){
+            c.gridx=0; c.gridy=row;
+            optionPanel.add(new JLabel(e.getKey()+":"),c);
+
+            JComboBox<String> cb = new JComboBox<>(
+                    e.getValue().stream()
+                            .map(RiskCoeff::getOptionName)
+                            .toArray(String[]::new));
+            comboMap.put(e.getKey(), cb);
+            c.gridx=1;
+            optionPanel.add(cb,c);
+            row++;
+        }
+        /* сразу обновляем метаданные + премию */
+        updateMeta();
+        optionPanel.revalidate(); optionPanel.repaint();
     }
 
     private void updateMeta(){
-        Meta m = types.get(cbType.getSelectedItem());
-        lblBase.setText(String.format("%.4f", m.rate()));
-        lblLimits.setText(String.format("%.0f – %.0f", m.limMin(), m.limMax()));
-        spMonths.setValue(m.term());
+        InsuranceType it = types.stream()
+                .filter(t -> t.getCode().equals(cbType.getSelectedItem()))
+                .findFirst().orElseThrow();
+
+        lblBase.setText(String.format("%.4f",
+                (it.getBaseRateMin()+it.getBaseRateMax())/2.0));
+        lblLimits.setText(String.format("%.0f – %.0f",
+                it.getLimitMin(), it.getLimitMax()));
+
+        /* дефолтный срок */
+        spMonths.setValue(it.getDefaultTerm());
         recalc();
     }
 
     private void recalc(){
         try{
-            Meta m = types.get(cbType.getSelectedItem());
-            double cov = Double.parseDouble(tfCoverage.getText());
-            double prem = cov * m.rate() * (double)spMonths.getValue()/12.0;
+            InsuranceType it = types.stream()
+                    .filter(t -> t.getCode().equals(cbType.getSelectedItem()))
+                    .findFirst().orElseThrow();
+
+            double base = (it.getBaseRateMin()+it.getBaseRateMax())/2.0;
+            double cov  = Double.parseDouble(tfCoverage.getText().replace(',','.'));
+
+            /* K_TERM */
+            int m   = (Integer) spMonths.getValue();
+            double kTerm = 1.0;          // пока =1, позже можно вытянуть с сервера
+
+            /* K_options */
+            double kOpt  = 1.0;
+            List<RiskCoeff> rcs = coeffByType.get(it.getCode());
+            for(var e: comboMap.entrySet()){
+                String grp = e.getKey();
+                String optName = (String) e.getValue().getSelectedItem();
+                kOpt*= rcs.stream()
+                        .filter(rc-> rc.getGroup().equals(grp)
+                                && rc.getOptionName().equals(optName))
+                        .map(RiskCoeff::getValue).findFirst().orElse(1.0);
+            }
+            double prem = cov * base * kTerm * kOpt;
             lblPrem.setText(String.format("%.2f", prem));
-        }catch(Exception ignored){ lblPrem.setText("‑‑‑"); }
+        }catch(Exception ex){
+            lblPrem.setText("‑‑‑");
+        }
     }
 
-    private void submit(MainFrame parent){
-        String code   = (String) cbType.getSelectedItem();
-        int months    = (Integer) spMonths.getValue();
-        String amount = tfCoverage.getText().replace(',','.');
-        String answers= "coverage="+amount;        // примитивно
+    /* === ОТПРАВКА НА СЕРВЕР ============================================ */
+    private void submit(MainFrame p){
+        String type   = (String) cbType.getSelectedItem();
+        int    months = (Integer) spMonths.getValue();
+        double cov    = Double.parseDouble(tfCoverage.getText().replace(',','.'));
 
-        parent.sendCommand(String.format("NEWAPP %s %d %s",code,months,answers),false);
-        parent.refreshApplications();
+        /* 1. создаём заявку -> получаем ID */
+        StringBuilder resp = new StringBuilder();
+        p.sendSync(String.format("NEWAPP %s %d %.2f", type, months, cov), resp);
+
+        if(!resp.toString().startsWith("OK")){
+            JOptionPane.showMessageDialog(this,"Сервер: "+resp,"Ошибка",JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        long appId = Long.parseLong(resp.toString().split(" ")[1]);
+
+        /* 2. отправляем ответы коэффициентов */
+        for(var e: comboMap.entrySet()){
+            String grp = e.getKey();
+            String opt = e.getValue().getSelectedItem().toString().replace(' ','_');
+            p.sendCommand(String.format("NEWAPP_ANSWER %d %s %s", appId, grp, opt), false);
+        }
+
+        p.refreshApplications();
         dispose();
     }
 
+    /* === УТИЛИТЫ ======================================================== */
     private void addRow(GridBagConstraints c,int y,String lbl,JComponent comp){
         c.gridx=0; c.gridy=y; add(new JLabel(lbl),c);
-        c.gridx=1;             add(comp,c);
+        c.gridx=1;           add(comp,c);
     }
 
-    /* удобный DocumentListener */
     private static class SimpleChange implements DocumentListener{
         private final Runnable r;
         SimpleChange(Runnable r){ this.r=r; }
