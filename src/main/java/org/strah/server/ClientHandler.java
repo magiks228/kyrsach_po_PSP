@@ -79,6 +79,8 @@ public class ClientHandler extends Thread {
                     case "TYPES", "INTYPE_LIST"  -> streamInsuranceTypes(out);
                     case "COEFFS", "INCOEFF_LIST" -> streamRiskCoeffs(out);
 
+                    case "CALC" -> handleCalc(args, out);
+
 
                     case "EXIT"      -> { out.println("BYE"); socket.close(); return; }
                     default          -> out.println("ERR Unknown");
@@ -675,6 +677,43 @@ public class ClientHandler extends Thread {
                     );
                 }
             }
+            out.println("END");
+        }
+    }
+
+
+    /**
+     * CALC <appId> — пересчитать premium и сохранить
+     */
+    private void handleCalc(String args, PrintWriter out) {
+        if (requireStaff(out)) return;
+
+        long appId;
+        try {
+            appId = Long.parseLong(args.trim());
+        } catch (NumberFormatException ex) {
+            out.println("ERR Syntax");
+            out.println("END");
+            return;
+        }
+
+        try (Session s = HibernateUtil.getSessionFactory().openSession()) {
+            Transaction tx = s.beginTransaction();
+            Application app = s.get(Application.class, appId);
+            if (app == null) {
+                out.println("ERR NoApp");
+                out.println("END");
+                return;
+            }
+            // пересчитываем премию
+            double newPremium = new PremiumCalculator().calculate(app, s);
+            app.setPremium(newPremium);
+            tx.commit();
+
+            out.println("OK " + newPremium);
+            out.println("END");
+        } catch (Exception e) {
+            out.println("ERR " + e.getMessage());
             out.println("END");
         }
     }
