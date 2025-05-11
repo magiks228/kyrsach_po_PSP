@@ -173,4 +173,8 @@ public class MainFrame extends JFrame {
 
     /* интерфейс для моделей-таблиц */
     interface LineReceiver { void addFromLine(String s); void clear(); }
+
+    /* === геттеры для диалогов === */
+    PrintWriter    getWriter(){ return out; }
+    BufferedReader getReader(){ return in; }
 }

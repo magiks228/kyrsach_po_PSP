@@ -58,8 +58,8 @@ class NewAppDialog extends JDialog {
     /* ===== helpers ===== */
 
     private void loadTypes(MainFrame parent){
-        PrintWriter out = parent.out;
-        BufferedReader in = parent.in;
+        PrintWriter out = parent.getWriter();
+        BufferedReader in = parent.getReader();
         out.println("TYPES");
         try{
             String l; while(!(l=in.readLine()).equals("END")){
