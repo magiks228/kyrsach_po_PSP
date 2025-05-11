@@ -1,115 +1,120 @@
 package org.strah.client;
 
+import org.strah.model.users.Role;
+
 import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.io.BufferedReader;
 import java.io.PrintWriter;
-import java.util.ArrayList;
-import java.util.List;
 
-class UsersPanel extends JPanel {
-
-    private final UserModel model = new UserModel();
+public class UsersPanel extends JPanel {
     private final PrintWriter out;
     private final BufferedReader in;
+    private final DefaultTableModel model;
 
-    UsersPanel(PrintWriter out, BufferedReader in){
-        super(new BorderLayout());
-        this.out=out; this.in=in;
+    public UsersPanel(PrintWriter out, BufferedReader in) {
+        this.out = out;
+        this.in  = in;
 
+        setLayout(new BorderLayout());
+
+        // 1) Таблица пользователей
+        model = new DefaultTableModel(new String[]{"Login","Role","Full Name"}, 0) {
+            @Override public boolean isCellEditable(int row, int col) { return false; }
+        };
         JTable table = new JTable(model);
-        JButton bRef = new JButton("Обновить");
-        JButton bAdd = new JButton("Добавить");
-        JButton bRole= new JButton("Сделать админом");
-        JButton bDel = new JButton("Удалить");
+        add(new JScrollPane(table), BorderLayout.CENTER);
 
-        bRef.addActionListener(e -> loadUsers());
-        bAdd.addActionListener(e -> addUserDialog());
-        bRole.addActionListener(e -> changeRole(table,"Администратор"));
-        bDel.addActionListener(e -> deleteUser(table));
+        // 2) Кнопки внизу
+        JPanel btns = new JPanel();
+        JButton bRefresh = new JButton("Обновить");
+        JButton bAdd     = new JButton("Добавить");
 
-        JPanel south=new JPanel();
-        south.add(bRef); south.add(bAdd); south.add(bRole); south.add(bDel);
+        bRefresh.addActionListener(e -> loadUsers());
+        bAdd.addActionListener(e     -> showAddDialog());
 
-        add(new JScrollPane(table),BorderLayout.CENTER);
-        add(south,BorderLayout.SOUTH);
+        btns.add(bRefresh);
+        btns.add(bAdd);
+        add(btns, BorderLayout.SOUTH);
 
+        // сразу загрузим список
         loadUsers();
     }
 
-    /* ---- команды ---- */
-    private void loadUsers(){
-        model.clear();
-        send("USERS").forEach(model::addFromLine);
-    }
-    private void addUserDialog(){
-        JTextField l=new JTextField(); JPasswordField p=new JPasswordField(); JTextField f=new JTextField();
-        String[] roles={"Клиент","Сотрудник","Администратор"};
-        JComboBox<String> cb=new JComboBox<>(roles);
-        JPanel pan=new JPanel(new GridLayout(4,2));
-        pan.add(new JLabel("Логин:")); pan.add(l);
-        pan.add(new JLabel("Пароль:")); pan.add(p);
-        pan.add(new JLabel("ФИО:"));   pan.add(f);
-        pan.add(new JLabel("Роль:"));  pan.add(cb);
-        if(JOptionPane.showConfirmDialog(this,pan,"Новый пользователь",
-                JOptionPane.OK_CANCEL_OPTION)==JOptionPane.OK_OPTION){
-            String cmd="NEWUSER "+l.getText()+" "+new String(p.getPassword())+" "+cb.getSelectedItem()+" "+f.getText().replace(' ','_');
-            List<String> r=send(cmd);
-            if(r.isEmpty()) loadUsers();
-        }
-    }
-    private void changeRole(JTable t,String role){
-        int row=t.getSelectedRow();
-        if(row==-1) return;
-        String login=(String)model.getValueAt(row,0);
-        List<String> r=send("SETROLE "+login+" "+role);
-        if(r.isEmpty()) loadUsers();
-    }
-    private void deleteUser(JTable t){
-        int row=t.getSelectedRow();
-        if(row==-1) return;
-        String login=(String)model.getValueAt(row,0);
-        if(JOptionPane.showConfirmDialog(this,"Удалить "+login+"?","",
-                JOptionPane.OK_CANCEL_OPTION)==JOptionPane.OK_OPTION){
-            List<String> r=send("DELUSER "+login);
-            if(r.isEmpty()) loadUsers();
-        }
-    }
-
-    /* ---- обмен с сервером ---- */
-    private List<String> send(String cmd){
-        List<String> res=new ArrayList<>();
-        out.println(cmd);
-        try{
-            String l;
-            while(!(l=in.readLine()).equals("END")){
-                if(l.startsWith("ERR")) {                   // показываем и прекращаем
-                    JOptionPane.showMessageDialog(this,"Сервер: "+l);
-                    return res;
+    private void loadUsers() {
+        model.setRowCount(0);
+        try {
+            out.println("USERS");
+            String line;
+            while ((line = in.readLine()) != null) {
+                if (line.equals("END")) break;
+                if (line.startsWith("ERR")) {
+                    JOptionPane.showMessageDialog(this, "Сервер: " + line, "Ошибка", JOptionPane.ERROR_MESSAGE);
+                    return;
                 }
-                if(!l.isBlank()) res.add(l);                // только непустые строки
+                // строка формата: login role full_name_with_underscores
+                String[] parts = line.split(" ", 3);
+                // восстанавливаем пробелы в имени
+                String fullName = parts[2].replace('_',' ');
+                model.addRow(new Object[]{ parts[0], parts[1], fullName });
             }
-        }catch(Exception e){ JOptionPane.showMessageDialog(this,"Связь потеряна"); }
-        return res;
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Связь потеряна", "Ошибка", JOptionPane.ERROR_MESSAGE);
+        }
     }
 
-    /* ---- модель таблицы ---- */
-    static class UserModel extends javax.swing.table.AbstractTableModel {
-        private final List<String[]> rows=new ArrayList<>();
-        private final String[] cols={"Логин","Роль","ФИО"};
+    private void showAddDialog() {
+        JTextField tfLogin = new JTextField(10);
+        JPasswordField pf   = new JPasswordField(10);
+        JComboBox<String> cbRole = new JComboBox<>(
+                // подставляем именно имена enum-а, а не русские строки
+                new String[]{ Role.ADMIN.name(), Role.STAFF.name(), Role.CLIENT.name() }
+        );
+        JTextField tfName  = new JTextField(15);
 
-        void addFromLine(String s){
-            String[] parts = s.split(" ");
-            if(parts.length < 3)               // пропускаем строки типа EMPTY
-                return;
-            rows.add(parts);
-            fireTableDataChanged();
+        JPanel p = new JPanel(new GridLayout(4,2,4,4));
+        p.add(new JLabel("Login:"));      p.add(tfLogin);
+        p.add(new JLabel("Password:"));   p.add(pf);
+        p.add(new JLabel("Role:"));       p.add(cbRole);
+        p.add(new JLabel("Full name:"));  p.add(tfName);
+
+        int rc = JOptionPane.showConfirmDialog(
+                this, p, "Новый пользователь",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE
+        );
+        if (rc != JOptionPane.OK_OPTION) return;
+
+        String login = tfLogin.getText().trim();
+        String pass  = new String(pf.getPassword()).trim();
+        String role  = (String)cbRole.getSelectedItem();
+        String name  = tfName.getText().trim().replace(' ','_');
+
+        if (login.isEmpty() || pass.isEmpty() || name.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Все поля обязательны", "Ошибка", JOptionPane.ERROR_MESSAGE);
+            return;
         }
 
-        void clear(){ rows.clear(); fireTableDataChanged(); }
-        @Override public int getRowCount(){ return rows.size(); }
-        @Override public int getColumnCount(){ return cols.length; }
-        @Override public String getColumnName(int c){ return cols[c]; }
-        @Override public Object getValueAt(int r,int c){ return rows.get(r)[c]; }
+        // шлём команду на сервер
+        out.println(String.join(" ",
+                "NEWUSER", login, pass, role, name
+        ));
+
+        try {
+            // ждём ответ до END или первого OK/ERR
+            String line;
+            while ((line = in.readLine()) != null) {
+                if (line.startsWith("OK")) {
+                    JOptionPane.showMessageDialog(this, "Пользователь добавлен");
+                    loadUsers();  // обновляем таблицу
+                    return;
+                } else if (line.startsWith("ERR")) {
+                    JOptionPane.showMessageDialog(this, "Сервер: " + line, "Ошибка", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+            }
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Связь потеряна", "Ошибка", JOptionPane.ERROR_MESSAGE);
+        }
     }
 }
