@@ -8,7 +8,6 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.net.Socket;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -23,12 +22,32 @@ public class MainFrame extends JFrame {
     private final ClaimModel       claimModel  = new ClaimModel();
     private final ApplicationModel appModel    = new ApplicationModel();
 
-    public MainFrame(Socket sock, PrintWriter out, BufferedReader in, String role) {
+    // Панели для STAFF/ADMIN
+    private final PolicyCreatePanel policyCreatePanel;
+    private final UsersPanel        usersPanel;
+
+    public MainFrame(Socket sock,
+                     PrintWriter out,
+                     BufferedReader in,
+                     String role) {
         super("Страхование — " + role);
         this.socket = sock;
         this.out    = out;
         this.in     = in;
         this.role   = role;
+
+        boolean isStaff  = "ADMIN".equalsIgnoreCase(role)
+                || "STAFF".equalsIgnoreCase(role)
+                || "АДМИНИСТРАТОР".equalsIgnoreCase(role)
+                || "СОТРУДНИК".equalsIgnoreCase(role);
+        boolean isClient = "CLIENT".equalsIgnoreCase(role)
+                || "КЛИЕНТ".equalsIgnoreCase(role);
+
+        // Инициализируем панели
+        // Для создания полиса нужен список логинов клиентов
+        List<String> clients = loadClients();
+        this.policyCreatePanel = new PolicyCreatePanel(this, clients);
+        this.usersPanel        = new UsersPanel(out, in);
 
         JTabbedPane tabs = new JTabbedPane();
 
@@ -41,13 +60,13 @@ public class MainFrame extends JFrame {
         pnlPol.add(bPol, BorderLayout.SOUTH);
         tabs.addTab("Полисы", pnlPol);
 
-        // --- Заявки на выплаты ---
+        // --- Заявки-выплаты ---
         JTable tblCl = new JTable(claimModel);
         JButton bCl = new JButton("Обновить");
         JButton bNewC = new JButton("Создать заявку");
         bCl.addActionListener(e -> request("CLAIMS", claimModel));
         bNewC.addActionListener(e ->
-                new NewClaimDialog(this, policyModel.getPolicyNumbers()).setVisible(true)
+                new NewClaimDialog(this, policyModel.getCoverageMap()).setVisible(true)
         );
         JPanel pnlCl = new JPanel(new BorderLayout());
         JPanel southCl = new JPanel();
@@ -65,31 +84,36 @@ public class MainFrame extends JFrame {
         JButton bAppApprove = new JButton("Одобрить");
         JButton bAppDecline = new JButton("Отклонить");
         JButton bAppNew     = new JButton("Новая заявка");
+        JButton bAppPay     = new JButton("Оплатить");
 
         bAppRefresh.addActionListener(e -> request("APPLIST", appModel));
         bAppNew    .addActionListener(e -> new NewAppDialog(this).setVisible(true));
 
-        // — одобрить
-        bAppApprove.addActionListener(e -> {
-            int row = tblApp.getSelectedRow();
-            if (row < 0) return;
-            String idStr = appModel.getValueAt(row, 0).toString();
-            long id = Long.parseLong(idStr);
-            sendCommand("APPROVE " + id, false);
-            request("APPLIST", appModel);
-        });
-        // — отклонить
-        bAppDecline.addActionListener(e -> {
-            int row = tblApp.getSelectedRow();
-            if (row < 0) return;
-            String idStr = appModel.getValueAt(row, 0).toString();
-            long id = Long.parseLong(idStr);
-            sendCommand("DECLINE " + id, false);
-            request("APPLIST", appModel);
-        });
-
-        boolean isStaff = role.equalsIgnoreCase("Сотрудник")
-                || role.equalsIgnoreCase("Администратор");
+        if (isStaff) {
+            bAppApprove.addActionListener(e -> {
+                int row = tblApp.getSelectedRow();
+                if (row < 0) return;
+                long id = Long.parseLong(appModel.getValueAt(row, 0).toString());
+                sendCommand("APPROVE " + id, false);
+                request("APPLIST", appModel);
+            });
+            bAppDecline.addActionListener(e -> {
+                int row = tblApp.getSelectedRow();
+                if (row < 0) return;
+                long id = Long.parseLong(appModel.getValueAt(row, 0).toString());
+                sendCommand("DECLINE " + id, false);
+                request("APPLIST", appModel);
+            });
+        }
+        if (isClient) {
+            bAppPay.addActionListener(e -> {
+                int row = tblApp.getSelectedRow();
+                if (row < 0) return;
+                String id = appModel.getValueAt(row, 0).toString();
+                sendCommand("PAY " + id, false);
+                request("APPLIST", appModel);
+            });
+        }
 
         JPanel pnlAppButtons = new JPanel();
         pnlAppButtons.add(bAppRefresh);
@@ -97,41 +121,37 @@ public class MainFrame extends JFrame {
             pnlAppButtons.add(bAppApprove);
             pnlAppButtons.add(bAppDecline);
         }
+        if (isClient) {
+            pnlAppButtons.add(bAppPay);
+        }
         pnlAppButtons.add(bAppNew);
 
         JPanel pnlApp = new JPanel(new BorderLayout());
         pnlApp.add(spApp, BorderLayout.CENTER);
         pnlApp.add(pnlAppButtons, BorderLayout.SOUTH);
-
         tabs.addTab("Заявки-страхование", pnlApp);
 
-        // --- Новый полис (для STAFF/ADMIN) ---
+        // --- Вкладки для STAFF/ADMIN ---
         if (isStaff) {
-            List<String> clients = loadClients();
-            tabs.addTab("Новый полис", new PolicyCreatePanel(this, clients));
+            tabs.addTab("Новый полис", policyCreatePanel);
+            tabs.addTab("Пользователи", usersPanel);
         }
 
-        // --- Пользователи (только ADMIN) ---
-        if (role.equalsIgnoreCase("Администратор")) {
-            UsersPanel users = new UsersPanel(out, in);
-            tabs.addTab("Пользователи", users);
-        }
-
-        add(tabs);
+        getContentPane().add(tabs, BorderLayout.CENTER);
         setSize(900, 550);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(EXIT_ON_CLOSE);
 
-        // при старте сразу подтягиваем список заявок
+        // сразу загружаем список заявок
         request("APPLIST", appModel);
     }
 
-    /** Перезагрузить список заявок-страхование */
+    /**
+     * Обновить список заявок-страхование (вызывается из NewAppDialog)
+     */
     public void refreshApplications() {
         request("APPLIST", appModel);
     }
-
-    /* ======================= util-методы =============================== */
 
     /** Универсальный метод запрос→модель */
     private void request(String cmd, LineReceiver model) {
@@ -181,8 +201,8 @@ public class MainFrame extends JFrame {
     }
 
     /** Загружает список клиентов (для "Новый полис") */
-    private List<String> loadClients() {
-        List<String> list = new ArrayList<>();
+    public List<String> loadClients() {
+        List<String> list = new java.util.ArrayList<>();
         out.println("USERS");
         try {
             String line;
@@ -193,7 +213,7 @@ public class MainFrame extends JFrame {
                 if (parts.length < 2) continue;
                 String login = parts[0], roleStr = parts[1];
                 if (Role.CLIENT.name().equalsIgnoreCase(roleStr)
-                        || "Клиент".equalsIgnoreCase(roleStr)) {
+                        || "CLIENT".equalsIgnoreCase(roleStr)) {
                     list.add(login);
                 }
             }
@@ -205,7 +225,7 @@ public class MainFrame extends JFrame {
         return list;
     }
 
-    /** Отправка команды с визуальной индикацией */
+    /** Отправка команды с опциональным обновлением полисов */
     public void sendCommand(String cmd, boolean refreshPolicies) {
         StringBuilder resp = new StringBuilder();
         sendSync(cmd, resp::append);
@@ -220,11 +240,11 @@ public class MainFrame extends JFrame {
         }
     }
 
-    interface LineReceiver {
+    public interface LineReceiver {
         void addFromLine(String s);
         void clear();
     }
 
-    public PrintWriter    getWriter() { return out; }
-    public BufferedReader getReader() { return in; }
+    public PrintWriter    getWriter()  { return out; }
+    public BufferedReader getReader()  { return in; }
 }

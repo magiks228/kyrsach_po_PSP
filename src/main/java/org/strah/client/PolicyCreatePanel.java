@@ -1,84 +1,133 @@
 package org.strah.client;
 
+import org.strah.model.types.InsuranceType;
+
 import javax.swing.*;
 import java.awt.*;
+import java.io.BufferedReader;
+import java.io.PrintWriter;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.Locale;
 
-class PolicyCreatePanel extends JPanel {
+public class PolicyCreatePanel extends JPanel {
 
-    private static final DateTimeFormatter DF =
-            DateTimeFormatter.ofPattern("dd-MM-yyyy");
+    private final MainFrame parent;
+    private final JTextField tfNumber    = new JTextField(12);
+    private final JComboBox<String> cbType;
+    private final JTextField tfStart     = new JTextField(10);
+    private final JTextField tfEnd       = new JTextField(10);
+    private final JTextField tfPremium   = new JTextField("0.0", 10);
+    private final JTextField tfCoverage  = new JTextField("0.0", 10);
+    private final JComboBox<String> cbClient;
 
-    PolicyCreatePanel(MainFrame parent, List<String> clients) {
+    public PolicyCreatePanel(MainFrame parent, List<String> clients) {
         super(new GridBagLayout());
+        this.parent = parent;
+
+        // Загружаем коды типов из сервера
+        DefaultComboBoxModel<String> typeModel = new DefaultComboBoxModel<>();
+        parent.sendSync("INTYPE_LIST", line -> {
+            String[] parts = line.split(" ");
+            // формат: code nameRu baseMin baseMax limitMin limitMax defaultTerm franchisePct
+            typeModel.addElement(parts[0]);
+        });
+        cbType = new JComboBox<>(typeModel);
+
+        cbClient = new JComboBox<>(clients.toArray(new String[0]));
+
         GridBagConstraints c = new GridBagConstraints();
-        c.insets = new Insets(4, 4, 4, 4);
-        c.anchor = GridBagConstraints.WEST;
+        c.insets  = new Insets(4,4,4,4);
+        c.anchor  = GridBagConstraints.WEST;
+        c.gridx   = 0;
+        c.gridy   = 0;
 
-        JTextField tfNum   = new JTextField(15);
+        add(new JLabel("Номер полиса:"), c);
+        c.gridx = 1; add(tfNumber, c);
 
-        JComboBox<String> cbType = new JComboBox<>(new String[]{
-                "PROP   - Property",
-                "BI     - Business Interruption",
-                "GL     - Liability",
-                "E&O    - Errors & Omissions",
-                "PROD   - Product Liability",
-                "CREDIT - Financial",
-                "CYBER  - Cyber",
-                "CARGO  - Cargo",
-                "D&O    - D&O"
-        });
+        c.gridy++; c.gridx = 0;
+        add(new JLabel("Тип полиса:"), c);
+        c.gridx = 1; add(cbType, c);
 
-        JTextField tfStart = new JTextField(LocalDate.now().format(DF), 10);
-        JTextField tfEnd   = new JTextField(
-                LocalDate.now().plusMonths(6).format(DF), 10);
+        c.gridy++; c.gridx = 0;
+        add(new JLabel("Дата начала (гггг-MM-дд):"), c);
+        c.gridx = 1; add(tfStart, c);
 
-        JSpinner  spPrem   = new JSpinner(
-                new SpinnerNumberModel(1000.0, 0, 1e9, 100));
+        c.gridy++; c.gridx = 0;
+        add(new JLabel("Дата окончания:"), c);
+        c.gridx = 1; add(tfEnd, c);
 
-        JComboBox<String> cbClient =
-                new JComboBox<>(clients.toArray(new String[0]));
+        c.gridy++; c.gridx = 0;
+        add(new JLabel("Премия BYN:"), c);
+        c.gridx = 1; add(tfPremium, c);
 
-        addRow(c, 0, "Номер полиса:", tfNum);
-        addRow(c, 1, "Тип:",           cbType);
-        addRow(c, 2, "Начало (dd-MM-yyyy):", tfStart);
-        addRow(c, 3, "Окончание:",     tfEnd);
-        addRow(c, 4, "Премия:",        spPrem);
-        addRow(c, 5, "Клиент:",        cbClient);
+        c.gridy++; c.gridx = 0;
+        add(new JLabel("Сумма покрытия BYN:"), c);
+        c.gridx = 1; add(tfCoverage, c);
 
-        JButton btnSave = new JButton("Сохранить");
-        btnSave.addActionListener(e -> {
+        c.gridy++; c.gridx = 0;
+        add(new JLabel("Клиент (login):"), c);
+        c.gridx = 1; add(cbClient, c);
 
-            String rawType  = (String) cbType.getSelectedItem(); // "CREDIT - Financial"
-            String typeCode = rawType.split(" ")[0];             // "CREDIT"
+        c.gridy++; c.gridx = 0; c.gridwidth = 2;
+        JButton bCreate = new JButton("Создать полис");
+        add(bCreate, c);
 
-            String cmd = String.format("NEWPOLICY %s %s %s %s %s %s",
-                    tfNum.getText().trim(),
-                    typeCode,
-                    tfStart.getText().trim(),
-                    tfEnd.getText().trim(),
-                    spPrem.getValue(),
-                    cbClient.getSelectedItem());
-
-            parent.sendCommand(cmd, true);      // true → «обновить таблицу»
-            clear(tfNum, tfStart, tfEnd, spPrem);
-        });
-
-        c.gridx = 0; c.gridy = 6; c.gridwidth = 2;
-        add(btnSave, c);
+        bCreate.addActionListener(e -> onCreate());
     }
 
-    /* util */
-    private void addRow(GridBagConstraints c, int y, String lbl, JComponent comp){
-        c.gridx = 0; c.gridy = y; c.gridwidth = 1; add(new JLabel(lbl), c);
-        c.gridx = 1;             add(comp, c);
-    }
-    private void clear(JTextField n,JTextField s,JTextField e,JSpinner p){
-        n.setText("");
-        s.setText(LocalDate.now().format(DF));
-        e.setText("");
-        p.setValue(0);
+    private void onCreate() {
+        String num       = tfNumber.getText().trim();
+        String typeCode  = (String) cbType.getSelectedItem();
+        String startStr  = tfStart.getText().trim();
+        String endStr    = tfEnd.getText().trim();
+        double premium, coverage;
+        try {
+            premium  = Double.parseDouble(tfPremium.getText().replace(',', '.'));
+            coverage = Double.parseDouble(tfCoverage.getText().replace(',', '.'));
+        } catch (NumberFormatException ex) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Премия и покрытие должны быть числами",
+                    "Ошибка ввода",
+                    JOptionPane.ERROR_MESSAGE
+            );
+            return;
+        }
+
+        // Проверяем дату
+        try {
+            LocalDate.parse(startStr);
+            LocalDate.parse(endStr);
+        } catch (DateTimeParseException ex) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Неверный формат даты, ожидается YYYY-MM-DD",
+                    "Ошибка ввода",
+                    JOptionPane.ERROR_MESSAGE
+            );
+            return;
+        }
+
+        String client = (String) cbClient.getSelectedItem();
+        if (client == null) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Выберите клиента",
+                    "Ошибка ввода",
+                    JOptionPane.ERROR_MESSAGE
+            );
+            return;
+        }
+
+        // Формируем команду: NEWPOLICY num typeCode start end premium coverage client
+        String cmd = String.format(Locale.US,
+                "NEWPOLICY %s %s %s %s %.2f %.2f %s",
+                num, typeCode, startStr, endStr, premium, coverage, client
+        );
+
+        // Отправляем и сразу обновляем список
+        parent.sendCommand(cmd, true);
     }
 }

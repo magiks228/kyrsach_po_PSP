@@ -1,49 +1,63 @@
 package org.strah.client;
 
 import javax.swing.table.AbstractTableModel;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
+import java.util.stream.Collectors;
 
-/** Таблица полисов. */
-public class PolicyModel extends AbstractTableModel
-        implements MainFrame.LineReceiver {
+/**
+ * Модель для вкладки «Полисы». Ожидает от сервера строки вида:
+ *   <policyNumber> SEP <typeCode> SEP <coverage> SEP <startDate> SEP <endDate> SEP <premium> SEP <clientLogin>
+ */
+public class PolicyModel extends AbstractTableModel implements MainFrame.LineReceiver {
+    private static final String SEP = "\u001F";
 
-    private final List<String> rows = new ArrayList<>();
-    private final String[] COLS = {"Номер","Тип","Премия"};
+    private final List<String[]> rows = new ArrayList<>();
+    private static final String[] COLUMNS = {
+            "Номер полиса", "Тип", "Покрытие", "Дата начала", "Дата окончания", "Премия", "Клиент"
+    };
 
-    /* ===== LineReceiver ===== */
-
-    /** добавить строку, пришедшую с сервера */
-    @Override public void addFromLine(String s) {
-        rows.add(s.trim());
-        fireTableDataChanged();
-    }
-
-    /** очистить таблицу перед повторной загрузкой */
-    @Override public void clear() {
+    @Override
+    public void clear() {
         rows.clear();
         fireTableDataChanged();
     }
 
-    /** вспомогательно: список номеров полисов (для NewClaimDialog) */
-    public List<String> getPolicyNumbers() {
-        return rows.stream().map(r -> r.split(" ")[0]).toList();
+    @Override
+    public void addFromLine(String line) {
+        String[] parts = line.split(SEP, -1);
+        // ожидаем ровно 7 полей: [0]=номер, [1]=тип, [2]=покрытие, [3]=start, [4]=end, [5]=premia, [6]=client
+        if (parts.length == COLUMNS.length) {
+            rows.add(parts);
+            int last = rows.size() - 1;
+            fireTableRowsInserted(last, last);
+        }
     }
 
-    /* ===== TableModel ===== */
+    @Override public int getRowCount()       { return rows.size(); }
+    @Override public int getColumnCount()    { return COLUMNS.length; }
+    @Override public String getColumnName(int col) { return COLUMNS[col]; }
+    @Override public Object getValueAt(int row, int col) {
+        return rows.get(row)[col];
+    }
 
-    @Override public int getRowCount()           { return rows.size(); }
-    @Override public int getColumnCount()        { return COLS.length; }
-    @Override public String getColumnName(int c) { return COLS[c]; }
+    /** Для NewClaimDialog: список всех номеров полисов */
+    public List<String> getPolicyNumbers() {
+        return rows.stream()
+                .map(r -> r[0])
+                .collect(Collectors.toList());
+    }
 
-    @Override public Object getValueAt(int r,int c){
-        String[] p = rows.get(r).split(" ");
-        if(p.length < 3) return "";
-        return switch (c) {
-            case 0 -> p[0];   // номер
-            case 1 -> p[1];   // тип
-            case 2 -> p[2];   // премия
-            default -> "";
-        };
+    /** Для NewClaimDialog: карта «номер полиса → покрытие» */
+    public Map<String, Double> getCoverageMap() {
+        return rows.stream().collect(Collectors.toMap(
+                r -> r[0],
+                r -> {
+                    try {
+                        return Double.parseDouble(r[2]);
+                    } catch (NumberFormatException ex) {
+                        return 0.0;
+                    }
+                }
+        ));
     }
 }

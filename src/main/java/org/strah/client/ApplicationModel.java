@@ -4,46 +4,32 @@ import javax.swing.table.AbstractTableModel;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Модель для вкладки «Заявки-страхование».
+ * Каждая строка приходит от сервера в виде:
+ *    <id> SEP <typeCode> SEP <termMonths> SEP <coverageAmount>
+ *      SEP <premium> SEP <status> SEP <startDate> SEP <endDate>
+ */
 public class ApplicationModel extends AbstractTableModel implements MainFrame.LineReceiver {
     private static final String SEP = "\u001F";
 
     private final List<String[]> rows = new ArrayList<>();
-    private final String[] columnNames = {
-            "ID", "Тип", "Мес.", "Покрытие", "Премия", "Статус", "Начало", "Конец"
+    private final String[] columns = {
+            "ID", "Тип", "Срок (мес.)", "Покрытие", "Премия", "Статус", "Начало", "Окончание"
     };
 
     @Override
-    public void addFromLine(String line) {
-        String[] parts;
-        if (line.contains(SEP)) {
-            // split только на 8 частей
-            parts = line.split(SEP, 8);
-        } else {
-            parts = line.split(" ", 8);
-        }
-
-        // гарантируем длину 8
-        if (parts.length < 8) {
-            String[] tmp = new String[8];
-            System.arraycopy(parts, 0, tmp, 0, parts.length);
-            for (int i = parts.length; i < 8; i++) {
-                tmp[i] = "-";
-            }
-            parts = tmp;
-        }
-
-        rows.add(parts);
-        int last = rows.size() - 1;
-        fireTableRowsInserted(last, last);
+    public void clear() {
+        rows.clear();
+        fireTableDataChanged();
     }
 
     @Override
-    public void clear() {
-        int sz = rows.size();
-        if (sz > 0) {
-            rows.clear();
-            fireTableRowsDeleted(0, sz - 1);
-        }
+    public void addFromLine(String line) {
+        String[] parts = line.split(SEP, -1);
+        rows.add(parts);
+        int last = rows.size() - 1;
+        fireTableRowsInserted(last, last);
     }
 
     @Override
@@ -53,16 +39,16 @@ public class ApplicationModel extends AbstractTableModel implements MainFrame.Li
 
     @Override
     public int getColumnCount() {
-        return columnNames.length;
+        return columns.length;
     }
 
     @Override
-    public String getColumnName(int col) {
-        return columnNames[col];
+    public String getColumnName(int column) {
+        return columns[column];
     }
 
     @Override
-    public Object getValueAt(int row, int col) {
-        return rows.get(row)[col];
+    public Object getValueAt(int rowIndex, int columnIndex) {
+        return rows.get(rowIndex)[columnIndex];
     }
 }

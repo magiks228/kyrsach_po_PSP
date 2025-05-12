@@ -1,23 +1,30 @@
 package org.strah.model.policies;
 
-import org.strah.model.types.InsuranceType;
-import org.strah.model.users.AppUser;
-
-import java.time.LocalDate;
-
 import jakarta.persistence.Entity;
+import jakarta.persistence.PrimaryKeyJoinColumn;
+import jakarta.persistence.Table;
+import java.time.LocalDate;
+import org.strah.model.users.AppUser;
+import org.strah.model.types.InsuranceType;
 
 @Entity
+@Table(name = "standard_policies")
+@PrimaryKeyJoinColumn(name = "policy_id")
 public class StandardPolicy extends InsurancePolicy {
 
-    public StandardPolicy() {}        // Hibernate
-
-    public StandardPolicy(String num, LocalDate start, LocalDate end,
-                          double premium, AppUser client,
-                          InsuranceType type) {
-        super(num, start, end, premium, client, type);
+    protected StandardPolicy() {
+        super();
     }
 
-    @Override
-    public String getPolicyType() { return type.getName(); }
+    /**
+     * Конструктор для обычных (без покрытия) полисов.
+     */
+    public StandardPolicy(String number,
+                          LocalDate start,
+                          LocalDate end,
+                          double premium,
+                          AppUser customer,
+                          InsuranceType type) {
+        super(number, start, end, premium, customer, type);
+    }
 }

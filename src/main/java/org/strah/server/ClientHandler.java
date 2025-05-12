@@ -7,6 +7,7 @@ import org.strah.model.applications.Application;
 import org.strah.model.applications.ApplicationAnswer;
 import org.strah.model.applications.ApplicationStatus;
 import org.strah.model.claims.Claim;
+import org.strah.model.policies.FinancialRiskPolicy;
 import org.strah.model.policies.InsurancePolicy;
 import org.strah.model.policies.StandardPolicy;
 import org.strah.model.types.RiskCoeff;
@@ -25,6 +26,8 @@ import java.util.List;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+
+import static java.lang.System.out;
 
 public class ClientHandler extends Thread {
 
@@ -56,7 +59,7 @@ public class ClientHandler extends Thread {
                     case "LOGIN"   -> handleLogin(args,out);
                     case "REGISTER"-> handleRegister(args,out);
 
-                    case "POLICIES"-> handlePolicies(out);
+                    case "POLICIES" -> handlePolicies(out);
                     case "CLAIMS"  -> handleClaims(out);
                     case "NEWCLAIM"-> handleNewClaim(args,out);
 
@@ -136,26 +139,63 @@ public class ClientHandler extends Thread {
     }
 
     /* ---------- POLICIES (only own) ---------- */
-    private void handlePolicies(PrintWriter out){
+    private void handlePolicies(PrintWriter out) {
         if (notLogged(out)) return;
+        long customerId = currentUser.getId();
 
-        try (Session s = HibernateUtil.getSessionFactory().openSession()) {
+        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+            // 1) Стандартные полисы
+            List<StandardPolicy> stdList = session.createQuery(
+                            "from StandardPolicy p where p.customer.id = :cid",
+                            StandardPolicy.class
+                    )
+                    .setParameter("cid", customerId)
+                    .getResultList();
 
-            String hql = currentUser.getRoleEnum() == Role.CLIENT
-                    ? "from InsurancePolicy p where p.customer.id = :uid"
-                    : "from InsurancePolicy";
+            // 2) Финансовые риски
+            List<FinancialRiskPolicy> finList = session.createQuery(
+                            "from FinancialRiskPolicy p where p.customer.id = :cid",
+                            FinancialRiskPolicy.class
+                    )
+                    .setParameter("cid", customerId)
+                    .getResultList();
 
-            var q = s.createQuery(hql, InsurancePolicy.class);
-            if (hql.contains(":uid"))
-                q.setParameter("uid", currentUser.getId());
-
-            List<InsurancePolicy> list = q.list();
-            if (list.isEmpty()) out.println("EMPTY");
-            else for (InsurancePolicy p : list)
-                out.println(p.toListRow());
+            if (stdList.isEmpty() && finList.isEmpty()) {
+                out.println("EMPTY");
+            } else {
+                // Печатаем стандартные
+                for (StandardPolicy p : stdList) {
+                    out.println(
+                            p.getPolicyNumber() + SEP +
+                                    "STANDARD"            + SEP +
+                                    "-"                   + SEP +    // нет coverage для Standard
+                                    p.getStartDate()      + SEP +
+                                    p.getEndDate()        + SEP +
+                                    p.getPremium()        + SEP +
+                                    p.getCustomer().getLogin()
+                    );
+                }
+                // Печатаем финансовые
+                for (FinancialRiskPolicy p : finList) {
+                    out.println(
+                            p.getPolicyNumber()           + SEP +
+                                    "FINANCIAL"                   + SEP +
+                                    p.getCoverageAmount()         + SEP +
+                                    p.getStartDate()              + SEP +
+                                    p.getEndDate()                + SEP +
+                                    p.getPremium()                + SEP +
+                                    p.getCustomer().getLogin()
+                    );
+                }
+            }
+            out.println("END");
+        } catch (Exception e) {
+            out.println("ERR " + e.getMessage());
             out.println("END");
         }
     }
+
+
 
     /* ---------- CLAIMS ---------- */
     private void handleClaims(PrintWriter out){
@@ -208,11 +248,16 @@ public class ClientHandler extends Thread {
             }
 
             InsurancePolicy pol = q.uniqueResult();
-            if(pol==null){ out.println("ERR NoPolicy"); return; }
+            if(pol==null){
+                out.println("ERR NoPolicy");
+                out.println("END");
+                return;
+            }
             Transaction tx=s.beginTransaction();
             s.persist( new Claim(pol, LocalDate.now(), amount, descr) );
             tx.commit();
             out.println("OK");
+            out.println("END");
         }
     }
 
@@ -347,38 +392,68 @@ public class ClientHandler extends Thread {
     }
 
     /* ============ NEWPOLICY (ручное) — использует InsuranceType =========== */
+    // args: num typeCode start end premium coverage clientLogin
     private void handleNewPolicy(String args, PrintWriter out){
         if(requireStaff(out)) return;
 
         String[] a = args.split(" ");
-        if(a.length!=6){ out.println("ERR Syntax"); return; }
+        // ожидаем 7 аргументов
+        if(a.length != 7){
+            out.println("ERR Syntax");
+            out.println("END");
+            return;
+        }
 
-        String num       = a[0];
-        String typeCode  = a[1];
-        LocalDate start  = LocalDate.parse(a[2],DF);
-        LocalDate end    = LocalDate.parse(a[3],DF);
-        double premium   = Double.parseDouble(a[4]);
-        String clientLog = a[5];
+        String   num        = a[0];
+        String   typeCode   = a[1];
+        LocalDate startDate = LocalDate.parse(a[2], DF);
+        LocalDate endDate   = LocalDate.parse(a[3], DF);
+        double   premium    = Double.parseDouble(a[4]);
+        double   coverage   = Double.parseDouble(a[5]);
+        String   clientLog  = a[6];
 
         try(Session s = HibernateUtil.getSessionFactory().openSession()){
-            if(policyExists(s,num)){ out.println("ERR Exists"); return; }
+            if(policyExists(s, num)){
+                out.println("ERR Exists");
+                out.println("END");
+                return;
+            }
 
             InsuranceType type = s.createQuery(
-                            "from InsuranceType where code=:c", InsuranceType.class)
-                    .setParameter("c", typeCode).uniqueResult();
-            if(type==null){ out.println("ERR NoType"); return; }
+                            "from InsuranceType where code = :c", InsuranceType.class)
+                    .setParameter("c", typeCode)
+                    .uniqueResult();
+            if(type == null){
+                out.println("ERR NoType");
+                out.println("END");
+                return;
+            }
 
             AppUser client = s.byNaturalId(AppUser.class)
-                    .using("login", clientLog).load();
-            if(client==null){ out.println("ERR NoClient"); return; }
+                    .using("login", clientLog)
+                    .load();
+            if(client == null){
+                out.println("ERR NoClient");
+                out.println("END");
+                return;
+            }
 
-            Transaction tx=s.beginTransaction();
-            InsurancePolicy p = new StandardPolicy(
-                    num, start, end, premium, client, type);
-            s.persist(p); tx.commit();
+            Transaction tx = s.beginTransaction();
+            // создаём полис с покрытием
+            FinancialRiskPolicy p = new FinancialRiskPolicy(
+                    num, startDate, endDate, premium, coverage, client, type
+            );
+            s.persist(p);
+            tx.commit();
+
             out.println("OK");
+        } catch(Exception ex){
+            out.println("ERR " + ex.getMessage());
+        } finally {
+            out.println("END");
         }
     }
+
 
     private void handleNewApp(String args, PrintWriter out) {
         // parts: typeCode months coverage
@@ -523,45 +598,63 @@ public class ClientHandler extends Thread {
             Application app = s.get(Application.class, appId);
             if (app == null || !app.getCustomerId().equals(currentUser.getId())) {
                 out.println("ERR NoApp");
+                out.println("END");
                 return;
             }
-            // здесь проверяем именно ApplicationStatus.WAIT_PAYMENT
             if (app.getStatus() != ApplicationStatus.WAIT_PAYMENT) {
                 out.println("ERR BadStatus");
+                out.println("END");
                 return;
             }
 
             Transaction tx = s.beginTransaction();
+            // переводим заявку в PAID и ставим даты
             app.setStatus(ApplicationStatus.PAID);
-            tx.commit();
+            LocalDate start = LocalDate.now();
+            LocalDate end   = start.plusMonths(app.getTermMonths());
+            app.setStartDate(start);
+            app.setEndDate(end);
 
+            // сразу создаём полис
+            InsuranceType type = s.createQuery(
+                            "from InsuranceType where code = :c", InsuranceType.class)
+                    .setParameter("c", app.getTypeCode())
+                    .uniqueResult();
+            AppUser   client = s.get(AppUser.class, app.getCustomerId());
+            String polNum = type.getCode() + "-" +
+                    start.format(DateTimeFormatter.BASIC_ISO_DATE) + "-" +
+                    String.format("%04d", ThreadLocalRandom.current().nextInt(10000));
+            InsurancePolicy pol = new StandardPolicy(
+                    polNum, start, end, app.getPremium(), client, type);
+            pol.setApplication(app);
+            s.persist(pol);
+
+            tx.commit();
             out.println("OK");
             out.println("END");
         }
     }
 
     /** --- выпуск полиса из оплаченной заявки --- */
-    private void handlePolicyFromApp(String args, PrintWriter out) {
-        if (requireStaff(out)) return;
+    private void handlePolicyFromApp(String args, PrintWriter out){
+        if(requireStaff(out)) return;
         String[] a = args.split(" ");
-        if (a.length != 3) { out.println("ERR Syntax"); return; }
+        if(a.length!=3){ out.println("ERR Syntax"); out.println("END"); return; }
 
         long appId = Long.parseLong(a[0]);
         LocalDate start = LocalDate.parse(a[1], DF);
         LocalDate end   = LocalDate.parse(a[2], DF);
 
-        try (Session s = HibernateUtil.getSessionFactory().openSession()) {
-            Application app = s.get(Application.class, appId);
-            if (app == null) { out.println("ERR NoApp"); return; }
-            if (app.getStatus() != ApplicationStatus.PAID) {
-                out.println("ERR NotPaid"); return;
+        try(Session s = HibernateUtil.getSessionFactory().openSession()){
+            Application app = s.get(Application.class,appId);
+            if(app==null){ out.println("ERR NoApp"); out.println("END"); return; }
+            if(app.getStatus()!=ApplicationStatus.PAID){
+                out.println("ERR NotPaid"); out.println("END"); return;
             }
 
-            // получаем тип и клиента
             InsuranceType type = s.createQuery(
                             "from InsuranceType where code = :c", InsuranceType.class)
-                    .setParameter("c", app.getTypeCode())
-                    .uniqueResult();
+                    .setParameter("c", app.getTypeCode()).uniqueResult();
             AppUser client = s.get(AppUser.class, app.getCustomerId());
 
             // генерируем номер
@@ -569,9 +662,15 @@ public class ClientHandler extends Thread {
                     LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + "-" +
                     String.format("%04d", ThreadLocalRandom.current().nextInt(10_000));
 
-            Transaction tx = s.beginTransaction();
-            InsurancePolicy pol = new StandardPolicy(
-                    num, start, end, app.getPremium(), client, type
+            Transaction tx=s.beginTransaction();
+            InsurancePolicy pol = new FinancialRiskPolicy(
+                    num,
+                    start,
+                    end,
+                    app.getPremium(),          // рассчитанная премия
+                    app.getCoverageAmount(),   // сумма покрытия из заявки
+                    client,
+                    type
             );
             pol.setApplication(app);
             app.setStatus(ApplicationStatus.FINISHED);

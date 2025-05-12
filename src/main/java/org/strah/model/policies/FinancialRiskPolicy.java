@@ -1,35 +1,40 @@
 package org.strah.model.policies;
 
-import org.strah.model.types.InsuranceType;
-import org.strah.model.users.AppUser;
-
-import java.time.LocalDate;
-
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-
-/**
- * Полис страхования финансовых рисков.
- * Отличается только названием (формула расчёта – та же, что в StandardPolicy).
- */
+import jakarta.persistence.PrimaryKeyJoinColumn;
+import jakarta.persistence.Table;
+import java.time.LocalDate;
+import org.strah.model.users.AppUser;
+import org.strah.model.types.InsuranceType;
 
 @Entity
+@Table(name = "financial_risk_policies")
+@PrimaryKeyJoinColumn(name = "policy_id")
 public class FinancialRiskPolicy extends InsurancePolicy {
 
-    public FinancialRiskPolicy() {}   // конструктор по умолчанию для Hibernate
+    @Column(name = "coverage_amount", nullable = false)
+    private double coverageAmount;
 
-    /* ---------- конструктор ---------- */
-    public FinancialRiskPolicy(String num,
+    protected FinancialRiskPolicy() {
+        super();
+    }
+
+    /**
+     * Конструктор для полисов с указанием покрытия.
+     */
+    public FinancialRiskPolicy(String number,
                                LocalDate start,
                                LocalDate end,
                                double premium,
-                               AppUser client,
+                               double coverageAmount,
+                               AppUser customer,
                                InsuranceType type) {
-        super(num, start, end, premium, client, type);
+        super(number, start, end, premium, customer, type);
+        this.coverageAmount = coverageAmount;
     }
 
-    /* ---------- обязательное переопределение ---------- */
-    @Override
-    public String getPolicyType() {
-        return type.getName();          // «Финансовые риски» на русском
+    public double getCoverageAmount() {
+        return coverageAmount;
     }
 }
