@@ -17,6 +17,7 @@ import org.strah.utils.HibernateUtil;
 import org.strah.model.types.InsuranceType;
 import org.strah.model.users.Role;
 import org.strah.utils.PremiumCalculator;
+import java.time.format.DateTimeParseException;
 
 
 import java.io.*;
@@ -141,41 +142,45 @@ public class ClientHandler extends Thread {
     /* ---------- POLICIES (only own) ---------- */
     private void handlePolicies(PrintWriter out) {
         if (notLogged(out)) return;
-        long customerId = currentUser.getId();
 
         try (Session session = HibernateUtil.getSessionFactory().openSession()) {
-            // 1) Стандартные полисы
-            List<StandardPolicy> stdList = session.createQuery(
-                            "from StandardPolicy p where p.customer.id = :cid",
-                            StandardPolicy.class
-                    )
-                    .setParameter("cid", customerId)
-                    .getResultList();
+            List<StandardPolicy> stdList;
+            List<FinancialRiskPolicy> finList;
 
-            // 2) Финансовые риски
-            List<FinancialRiskPolicy> finList = session.createQuery(
-                            "from FinancialRiskPolicy p where p.customer.id = :cid",
-                            FinancialRiskPolicy.class
-                    )
-                    .setParameter("cid", customerId)
-                    .getResultList();
+            boolean isStaff = currentUser.getRoleEnum() == Role.ADMIN || currentUser.getRoleEnum() == Role.STAFF;
+
+            if (isStaff) {
+                // для STAFF и ADMIN — все полисы
+                stdList = session.createQuery("from StandardPolicy", StandardPolicy.class).list();
+                finList = session.createQuery("from FinancialRiskPolicy", FinancialRiskPolicy.class).list();
+            } else {
+                // для клиентов — только свои
+                long customerId = currentUser.getId();
+                stdList = session.createQuery(
+                                "from StandardPolicy p where p.customer.id = :cid", StandardPolicy.class)
+                        .setParameter("cid", customerId)
+                        .getResultList();
+
+                finList = session.createQuery(
+                                "from FinancialRiskPolicy p where p.customer.id = :cid", FinancialRiskPolicy.class)
+                        .setParameter("cid", customerId)
+                        .getResultList();
+            }
 
             if (stdList.isEmpty() && finList.isEmpty()) {
                 out.println("EMPTY");
             } else {
-                // Печатаем стандартные
                 for (StandardPolicy p : stdList) {
                     out.println(
                             p.getPolicyNumber() + SEP +
                                     "STANDARD"            + SEP +
-                                    "-"                   + SEP +    // нет coverage для Standard
+                                    "-"                   + SEP +
                                     p.getStartDate()      + SEP +
                                     p.getEndDate()        + SEP +
                                     p.getPremium()        + SEP +
                                     p.getCustomer().getLogin()
                     );
                 }
-                // Печатаем финансовые
                 for (FinancialRiskPolicy p : finList) {
                     out.println(
                             p.getPolicyNumber()           + SEP +
@@ -188,6 +193,7 @@ public class ClientHandler extends Thread {
                     );
                 }
             }
+
             out.println("END");
         } catch (Exception e) {
             out.println("ERR " + e.getMessage());
@@ -198,32 +204,39 @@ public class ClientHandler extends Thread {
 
 
     /* ---------- CLAIMS ---------- */
-    private void handleClaims(PrintWriter out){
+    private void handleClaims(PrintWriter out) {
         if (notLogged(out)) return;
         try (Session s = HibernateUtil.getSessionFactory().openSession()) {
-            String hql = currentUser.getRoleEnum() == Role.CLIENT
-                    ? "from Claim c where c.policy.customer.id = :uid"
-                    : "from Claim";
-            var q = s.createQuery(hql, Claim.class);
-            if (hql.contains(":uid")) q.setParameter("uid", currentUser.getId());
+            List<Claim> list = s.createQuery(
+                    "from Claim c where c.policy is not null", Claim.class
+            ).list();
 
-            List<Claim> list = q.list();
             if (list.isEmpty()) {
                 out.println("EMPTY");
             } else {
+                final String SEP = "\u001F";
                 for (Claim c : list) {
-                    // <id> SEP <policyNumber> SEP <amount> SEP <status>
+                    InsurancePolicy p = c.getPolicy();
+
+                    // Добавим защиту от проблем с null-полем policy (или если Hibernate не смог инициализировать)
+                    if (p == null || p.getPolicyNumber() == null) continue;
+
                     out.println(
-                            c.getId()               + SEP +
-                                    c.getPolicy().getPolicyNumber() + SEP +
-                                    c.getAmount()           + SEP +
+                            c.getId()             + SEP +
+                                    p.getPolicyNumber()   + SEP +
+                                    c.getAmount()         + SEP +
                                     c.getStatus()
                     );
                 }
+                out.println("END");
             }
+        } catch (Exception ex) {
+            ex.printStackTrace(); // оставим для логов
+            out.println("ERR " + ex.getMessage());
             out.println("END");
         }
     }
+
 
 
     /* ---------- NEWCLAIM ---------- */
@@ -276,7 +289,7 @@ public class ClientHandler extends Thread {
 
     /* USERS: login role fullName */
     private void handleUsers(PrintWriter out) {
-        if (requireAdmin(out)) {
+        if (requireStaff(out)) {
             out.println("END");    // <--- добавлено
             return;
         }
@@ -406,8 +419,19 @@ public class ClientHandler extends Thread {
 
         String   num        = a[0];
         String   typeCode   = a[1];
-        LocalDate startDate = LocalDate.parse(a[2], DF);
-        LocalDate endDate   = LocalDate.parse(a[3], DF);
+        // парсим даты из a[2] и a[3]
+        LocalDate startDate;
+        LocalDate endDate;
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("dd-MM-yyyy");
+        try {
+            startDate = LocalDate.parse(a[2], fmt);
+            endDate   = LocalDate.parse(a[3], fmt);
+        } catch (DateTimeParseException ex) {
+            out.println("ERR Неверный формат даты, используйте dd-MM-yyyy");
+            out.println("END");
+            return;
+        }
+
         double   premium    = Double.parseDouble(a[4]);
         double   coverage   = Double.parseDouble(a[5]);
         String   clientLog  = a[6];

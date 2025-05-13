@@ -10,6 +10,9 @@ import java.io.PrintWriter;
 import java.net.Socket;
 import java.util.List;
 import java.util.function.Consumer;
+import javax.swing.event.ChangeEvent;
+import javax.swing.event.ChangeListener;
+
 
 public class MainFrame extends JFrame {
 
@@ -50,6 +53,16 @@ public class MainFrame extends JFrame {
         this.usersPanel        = new UsersPanel(out, in);
 
         JTabbedPane tabs = new JTabbedPane();
+
+        tabs.addChangeListener(new ChangeListener() {
+            @Override
+            public void stateChanged(ChangeEvent e) {
+                int idx = tabs.getSelectedIndex();
+                if ("Новый полис".equals(tabs.getTitleAt(idx))) {
+                }
+            }
+        });
+
 
         // --- Полисы ---
         JTable tblPol = new JTable(policyModel);
@@ -179,6 +192,10 @@ public class MainFrame extends JFrame {
             String line;
             while ((line = in.readLine()) != null) {
                 if ("END".equals(line)) break;
+                if ("EMPTY".equals(line)) {
+                    handler.accept("EMPTY");  // ← передадим дальше как строку
+                    break;
+                }
                 handler.accept(line);
             }
         } catch (IOException e) {
@@ -200,45 +217,70 @@ public class MainFrame extends JFrame {
         request("CLAIMS", claimModel);
     }
 
-    /** Загружает список клиентов (для "Новый полис") */
-    public List<String> loadClients() {
-        List<String> list = new java.util.ArrayList<>();
-        out.println("USERS");
-        try {
-            String line;
-            while ((line = in.readLine()) != null) {
-                if ("END".equals(line)) break;
-                if (line.startsWith("ERR") || line.startsWith("EMPTY")) continue;
-                String[] parts = line.split(" ", 3);
-                if (parts.length < 2) continue;
-                String login = parts[0], roleStr = parts[1];
-                if (Role.CLIENT.name().equalsIgnoreCase(roleStr)
-                        || "CLIENT".equalsIgnoreCase(roleStr)) {
-                    list.add(login);
-                }
-            }
-        } catch (IOException e) {
-            JOptionPane.showMessageDialog(this,
-                    "Связь потеряна при загрузке списка клиентов",
-                    "Ошибка", JOptionPane.ERROR_MESSAGE);
-        }
+
+    /**
+     * Загружает список страховых типов с сервера и возвращает их как объекты PolicyCreatePanel.TypeInfo
+     * Команда:  INTYPE_LIST
+     */
+    /** Загружает виды страхования  (код‑>TypeInfo) */
+    public java.util.List<org.strah.client.PolicyCreatePanel.TypeInfo> loadPolicyTypes() {
+        final String SEP = "\u001F";
+        java.util.List<org.strah.client.PolicyCreatePanel.TypeInfo> list = new java.util.ArrayList<>();
+        sendSync("INTYPE_LIST", line -> {
+            String[] p = line.split(SEP);
+            if (p.length >= 7) list.add(new org.strah.client.PolicyCreatePanel.TypeInfo(p));
+        });
         return list;
     }
+
+
+    /** Загружает список клиентов (для "Новый полис") */
+    /**
+     * Загружает из сервера всех пользователей с ролью CLIENT (только их логины).
+     * Команда: USERS
+     */
+    public java.util.List<String> loadClients() {
+        java.util.List<String> clients = new java.util.ArrayList<>();
+        System.out.println("▶ Отправка команды USERS");
+        sendSync("USERS", line -> {
+            System.out.println("◀ Ответ от сервера: " + line); // ← это выведет каждую строку
+            if ("END".equals(line) || line.startsWith("ERR")) return;
+            String[] p = line.split(" ", 3);
+            if (p.length >= 2 && (
+                    "CLIENT".equalsIgnoreCase(p[1]) ||
+                            "КЛИЕНТ".equalsIgnoreCase(p[1])
+            )) {
+                clients.add(p[0]);
+            }
+        });
+        System.out.println("✅ Итоговый список клиентов: " + clients); // ← покажет, что попало в список
+        return clients;
+    }
+
 
     /** Отправка команды с опциональным обновлением полисов */
     public void sendCommand(String cmd, boolean refreshPolicies) {
         StringBuilder resp = new StringBuilder();
-        sendSync(cmd, resp::append);
+        System.out.println("▶ Команда отправлена: " + cmd);
+
+        sendSync(cmd, line -> {
+            System.out.println("◀ Ответ: " + line);
+            resp.append(line);
+        });
+
         if (resp.toString().startsWith("OK")) {
             JOptionPane.showMessageDialog(this, "Успешно");
+            if (refreshPolicies) {
+                request("POLICIES", policyModel);
+            }
+        } else if (resp.toString().startsWith("EMPTY")) {
+            JOptionPane.showMessageDialog(this, "Нет данных от сервера.");
         } else {
             JOptionPane.showMessageDialog(this, "Сервер: " + resp,
                     "Ошибка", JOptionPane.ERROR_MESSAGE);
         }
-        if (refreshPolicies) {
-            request("POLICIES", policyModel);
-        }
     }
+
 
     public interface LineReceiver {
         void addFromLine(String s);

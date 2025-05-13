@@ -23,7 +23,7 @@ public class HibernateUtil {
                     .addAnnotatedClass(Claim.class)
                     .addAnnotatedClass(Application.class)
                     .addAnnotatedClass(InsuranceType.class)
-                    .addAnnotatedClass(InsurancePolicy.class)
+//                    .addAnnotatedClass(InsurancePolicy.class)
                     .addAnnotatedClass(StandardPolicy.class)
                     .addAnnotatedClass(FinancialRiskPolicy.class)
                     .addAnnotatedClass(org.strah.model.types.RiskCoeff.class)
