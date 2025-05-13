@@ -27,9 +27,7 @@
         <mapping class="org.strah.model.applications.Application"/>
         <mapping class="org.strah.model.applications.ApplicationAnswer"/>
         <mapping class="org.strah.model.users.AppUser"/>
-<!--        //<mapping class="org.strah.model.policies.InsurancePolicy"/>-->
-        <mapping class="org.strah.model.policies.FinancialRiskPolicy"/>
-        <mapping class="org.strah.model.policies.StandardPolicy"/>
+        <mapping class="org.strah.model.policies.InsurancePolicy"/>
         <mapping class="org.strah.model.claims.Claim"/>
         <mapping class="org.strah.model.applications.ApplicationStatus"/>
         <mapping class="org.strah.model.types.InsuranceType"/>

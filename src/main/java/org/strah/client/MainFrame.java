@@ -16,6 +16,8 @@ import javax.swing.event.ChangeListener;
 
 public class MainFrame extends JFrame {
 
+    private static final String SEP = "\u001F"; // ASCII Unit Separator
+
     private final String         role;
     private final Socket         socket;
     private final PrintWriter    out;
@@ -196,6 +198,7 @@ public class MainFrame extends JFrame {
                     handler.accept("EMPTY");  // ← передадим дальше как строку
                     break;
                 }
+                System.out.println("Client received: " + line);
                 handler.accept(line);
             }
         } catch (IOException e) {

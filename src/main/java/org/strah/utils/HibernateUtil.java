@@ -23,16 +23,16 @@ public class HibernateUtil {
                     .addAnnotatedClass(Claim.class)
                     .addAnnotatedClass(Application.class)
                     .addAnnotatedClass(InsuranceType.class)
-//                    .addAnnotatedClass(InsurancePolicy.class)
-                    .addAnnotatedClass(StandardPolicy.class)
-                    .addAnnotatedClass(FinancialRiskPolicy.class)
+                    .addAnnotatedClass(InsurancePolicy.class)
                     .addAnnotatedClass(org.strah.model.types.RiskCoeff.class)
                     .addAnnotatedClass(org.strah.model.types.ApplicationTemplate.class)
                     .addAnnotatedClass(org.strah.model.types.RiskCoeffHistory.class)
                     .addAnnotatedClass(org.strah.model.applications.Application.class)
                     .addAnnotatedClass(org.strah.model.applications.ApplicationAnswer.class)
                     .addAnnotatedClass(RiskCoeff.class)
-                    .addAnnotatedClass(TermCoeff.class);
+                    .addAnnotatedClass(TermCoeff.class)
+                    .addAnnotatedClass(Claim.class);
+
 
             return cfg.buildSessionFactory();
         } catch (Throwable ex) {

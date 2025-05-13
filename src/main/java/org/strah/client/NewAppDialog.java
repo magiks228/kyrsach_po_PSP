@@ -78,13 +78,19 @@ public class NewAppDialog extends JDialog {
     }
 
     private List<InsuranceType> loadTypes(MainFrame p) {
+        System.out.println(">>> loadTypes() called");
         List<InsuranceType> list = new ArrayList<>();
         p.sendSync("INTYPE_LIST", line -> {
-            // делим по SEP, ожидаем 8 полей
+            if (line.equals("EMPTY")) return;  // ← пропустить, не парсить
             String[] v = line.split(SEP, 8);
+            System.out.println("Parsed type: " + Arrays.toString(v));
+            if (v.length < 8) {
+                System.err.println("Неполная строка типа: " + line);
+                return;
+            }
             list.add(new InsuranceType(
-                    v[0],              // code
-                    v[1].replace('_',' '), // nameRu
+                    v[0],
+                    v[1].replace('_', ' '),
                     Double.parseDouble(v[2]),
                     Double.parseDouble(v[3]),
                     Double.parseDouble(v[4]),
@@ -96,16 +102,20 @@ public class NewAppDialog extends JDialog {
         return list;
     }
 
+
     private Map<String,List<RiskCoeff>> loadCoeffs(MainFrame p) {
         Map<String,List<RiskCoeff>> map = new HashMap<>();
         p.sendSync("INCOEFF_LIST", line -> {
-            // делим по SEP, ожидаем 5 полей
             String[] v = line.split(SEP, 5);
+            if (v.length < 5) {
+                System.err.println("Неполная строка коэффициента: " + line);
+                return;  // пропускаем
+            }
             RiskCoeff rc = new RiskCoeff(
-                    v[0],               // typeCode
-                    v[1],               // group
-                    v[2],               // optionCode
-                    v[3].replace('_',' '), // optionName
+                    v[0],
+                    v[1],
+                    v[2],
+                    v[3].replace('_',' '),
                     Double.parseDouble(v[4])
             );
             map.computeIfAbsent(rc.getTypeCode(), k -> new ArrayList<>()).add(rc);
