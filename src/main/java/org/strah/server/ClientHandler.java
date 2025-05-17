@@ -77,6 +77,10 @@ public class ClientHandler extends Thread {
                     case "TYPES", "INTYPE_LIST"  -> streamInsuranceTypes(out);
                     case "COEFFS", "INCOEFF_LIST" -> streamRiskCoeffs(out);
 
+                    case "APPROVE_CLAIM" -> handleClaimStatusChange(args, Claim.Status.APPROVED, out);
+                    case "REJECT_CLAIM"  -> handleClaimStatusChange(args, Claim.Status.REJECTED, out);
+
+
                     case "CALC" -> handleCalc(args, out);
 
 
@@ -122,6 +126,11 @@ public class ClientHandler extends Thread {
     /* ---------- REGISTER (Client -> "Клиент") ---------- */
     private void handleRegister(String args, PrintWriter out){
         String[] a=args.split(" ",3);
+        if (a.length < 3) {
+            out.println("ERR Syntax");
+            out.println("END");
+            return;
+        }
         if(a.length<3){ out.println("ERR"); return; }
         String login=a[0], pass=a[1], fn=a[2].replace('_',' ');
         try(Session s=HibernateUtil.getSessionFactory().openSession()){
@@ -217,6 +226,11 @@ public class ClientHandler extends Thread {
     private void handleNewClaim(String args, PrintWriter out){
         if(notLogged(out)) return;
         String[] a=args.split(" ",3);
+        if (a.length < 3) {
+            out.println("ERR Syntax");
+            out.println("END");
+            return;
+        }
         if(a.length<3){ out.println("ERR"); return; }
         String polNum=a[0];
         double amount;
@@ -240,6 +254,7 @@ public class ClientHandler extends Thread {
                 out.println("END");
                 return;
             }
+
             Transaction tx=s.beginTransaction();
             s.persist( new Claim(pol, LocalDate.now(), amount, descr) );
             tx.commit();
@@ -294,6 +309,11 @@ public class ClientHandler extends Thread {
         if(requireAdmin(out)) return;
 
         String[] a = args.split(" ", 4);
+        if (a.length < 4) {
+            out.println("ERR Syntax");
+            out.println("END");
+            return;
+        }
         if (a.length < 4){ out.println("ERR"); return; }
 
         String login = a[0], pass = a[1], roleStr = a[2],
@@ -598,34 +618,13 @@ public class ClientHandler extends Thread {
             LocalDate end   = start.plusMonths(app.getTermMonths());
             app.setStartDate(start);
             app.setEndDate(end);
-
-            InsuranceType type = s.createQuery(
-                            "from InsuranceType where code = :c", InsuranceType.class)
-                    .setParameter("c", app.getTypeCode())
-                    .uniqueResult();
-            AppUser client = s.get(AppUser.class, app.getCustomerId());
-
-            String polNum = type.getCode() + "-" +
-                    start.format(DateTimeFormatter.BASIC_ISO_DATE) + "-" +
-                    String.format("%04d", ThreadLocalRandom.current().nextInt(10000));
-
-            InsurancePolicy pol = new InsurancePolicy(
-                    polNum,
-                    start,
-                    end,
-                    app.getPremium(),
-                    0.0, // без покрытия
-                    client,
-                    type
-            );
-            pol.setApplication(app);
-            s.persist(pol);
-
             tx.commit();
+
             out.println("OK");
             out.println("END");
         }
     }
+
 
     /** --- выпуск полиса из оплаченной заявки --- */
     private void handlePolicyFromApp(String args, PrintWriter out){
@@ -815,6 +814,61 @@ public class ClientHandler extends Thread {
             tx.commit();
 
             out.println("OK " + newPremium);
+            out.println("END");
+        } catch (Exception e) {
+            out.println("ERR " + e.getMessage());
+            out.println("END");
+        }
+    }
+
+
+
+    private void handleClaimStatusChange(String args, Claim.Status newStatus, PrintWriter out) {
+        if (requireStaff(out)) return;
+
+        long claimId;
+        try {
+            claimId = Long.parseLong(args.trim());
+        } catch (NumberFormatException e) {
+            out.println("ERR InvalidID");
+            out.println("END");
+            return;
+        }
+
+        try (Session s = HibernateUtil.getSessionFactory().openSession()) {
+            Claim claim = s.get(Claim.class, claimId);
+            if (claim == null) {
+                out.println("ERR NoClaim");
+                out.println("END");
+                return;
+            }
+
+            if (claim.getStatus() != Claim.Status.NEW) {
+                out.println("ERR AlreadyProcessed");
+                out.println("END");
+                return;
+            }
+
+            InsurancePolicy policy = claim.getPolicy();
+            double remaining = policy.getCoverageAmount();
+
+            if (newStatus == Claim.Status.APPROVED && claim.getAmount() > remaining) {
+                out.println("ERR OverLimit");
+                out.println("END");
+                return;
+            }
+
+            Transaction tx = s.beginTransaction();
+
+            claim.setStatus(newStatus);
+
+            if (newStatus == Claim.Status.APPROVED) {
+                policy.setCoverageAmount(remaining - claim.getAmount());
+            }
+
+            tx.commit();
+
+            out.println("OK");
             out.println("END");
         } catch (Exception e) {
             out.println("ERR " + e.getMessage());

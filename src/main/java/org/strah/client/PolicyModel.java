@@ -25,12 +25,40 @@ public class PolicyModel extends AbstractTableModel implements MainFrame.LineRec
     @Override
     public void addFromLine(String line) {
         String[] parts = line.split(SEP, -1);
-        // ожидаем ровно 7 полей: [0]=номер, [1]=тип, [2]=покрытие, [3]=start, [4]=end, [5]=premia, [6]=client
-        if (parts.length == COLUMNS.length) {
-            rows.add(parts);
-            int last = rows.size() - 1;
-            fireTableRowsInserted(last, last);
+        if (parts.length != COLUMNS.length) return;
+
+        String startDate = parts[3];
+        String endDate   = parts[4];
+
+        String formattedStart = startDate;
+        String formattedEnd   = endDate;
+
+        try {
+            if (!startDate.isBlank() && !startDate.equals("-")) {
+                formattedStart = java.time.LocalDate
+                        .parse(startDate, java.time.format.DateTimeFormatter.ISO_DATE)
+                        .format(java.time.format.DateTimeFormatter.ofPattern("dd-MM-yyyy"));
+            }
+            if (!endDate.isBlank() && !endDate.equals("-")) {
+                formattedEnd = java.time.LocalDate
+                        .parse(endDate, java.time.format.DateTimeFormatter.ISO_DATE)
+                        .format(java.time.format.DateTimeFormatter.ofPattern("dd-MM-yyyy"));
+            }
+        } catch (Exception e) {
+            // Логгирование можно добавить при желании
         }
+
+        rows.add(new String[] {
+                parts[0], // номер полиса
+                parts[1], // тип
+                parts[2], // покрытие
+                formattedStart,
+                formattedEnd,
+                parts[5], // премия
+                parts[6]  // клиент
+        });
+
+        fireTableRowsInserted(rows.size() - 1, rows.size() - 1);
     }
 
     @Override public int getRowCount()       { return rows.size(); }

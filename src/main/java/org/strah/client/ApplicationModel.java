@@ -27,7 +27,34 @@ public class ApplicationModel extends AbstractTableModel implements MainFrame.Li
     @Override
     public void addFromLine(String line) {
         String[] parts = line.split(SEP, -1);
-        rows.add(parts);
+        if (parts.length < 8) return;
+
+        String startDate = parts[6];
+        String endDate   = parts[7];
+
+        String formattedStart = startDate;
+        String formattedEnd   = endDate;
+
+        try {
+            if (!"-".equals(startDate) && !startDate.isBlank()) {
+                formattedStart = java.time.LocalDate
+                        .parse(startDate, java.time.format.DateTimeFormatter.ISO_DATE)
+                        .format(java.time.format.DateTimeFormatter.ofPattern("dd-MM-yyyy"));
+            }
+            if (!"-".equals(endDate) && !endDate.isBlank()) {
+                formattedEnd = java.time.LocalDate
+                        .parse(endDate, java.time.format.DateTimeFormatter.ISO_DATE)
+                        .format(java.time.format.DateTimeFormatter.ofPattern("dd-MM-yyyy"));
+            }
+        } catch (Exception e) {
+            // Если ошибка — оставим как есть
+        }
+
+        rows.add(new String[] {
+                parts[0], parts[1], parts[2], parts[3],
+                parts[4], parts[5], formattedStart, formattedEnd
+        });
+
         int last = rows.size() - 1;
         fireTableRowsInserted(last, last);
     }
