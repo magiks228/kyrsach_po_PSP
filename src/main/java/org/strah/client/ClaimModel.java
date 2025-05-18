@@ -26,9 +26,14 @@ public class ClaimModel extends AbstractTableModel implements MainFrame.LineRece
     @Override
     public void addFromLine(String line) {
         String[] parts = line.split(SEP, -1);
+
+        if (parts.length != 4) {
+            System.err.println("[ClaimModel] ⚠ Неверное количество полей: " + parts.length + " → " + line);
+            return;
+        }
+
         rows.add(parts);
-        int last = rows.size() - 1;
-        fireTableRowsInserted(last, last);
+        fireTableRowsInserted(rows.size() - 1, rows.size() - 1);
     }
 
     @Override
