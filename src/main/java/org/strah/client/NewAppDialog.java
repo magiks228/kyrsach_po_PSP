@@ -20,7 +20,7 @@ public class NewAppDialog extends JDialog {
     private final Map<String, JComboBox<String>> comboMap = new HashMap<>();
     private final JPanel optionPanel = new JPanel(new GridBagLayout());
 
-    private final JComboBox<String> cbType;
+    private JComboBox<String> cbType;
     private final JSpinner spMonths = new JSpinner(new SpinnerNumberModel(6, 1, 36, 1));
     private final JTextField tfCoverage = new JTextField("1000000", 12);
 
@@ -30,12 +30,25 @@ public class NewAppDialog extends JDialog {
 
     private final JButton btnSend = new JButton("Отправить");
 
+    private boolean failedToLoad = false;
+    public boolean isFailedToLoad() {
+        return failedToLoad;
+    }
+
     public NewAppDialog(MainFrame parent) {
         super(parent, "Новая заявка", true);
 
         // 0. Загрузка справочников
         types       = loadTypes(parent);
         coeffByType = loadCoeffs(parent);
+
+        if (types.isEmpty()) {
+            JOptionPane.showMessageDialog(parent,
+                    "Не удалось загрузить типы страхования.\nПовторите попытку позже.",
+                    "Ошибка загрузки", JOptionPane.ERROR_MESSAGE);
+            failedToLoad = true;
+            return;
+        }
 
         // 1. ComboBox для выбора типа
         cbType = new JComboBox<>(
@@ -78,48 +91,77 @@ public class NewAppDialog extends JDialog {
     }
 
     private List<InsuranceType> loadTypes(MainFrame p) {
-        System.out.println(">>> loadTypes() called");
         List<InsuranceType> list = new ArrayList<>();
+
         p.sendSync("INTYPE_LIST", line -> {
-            if (line.equals("EMPTY")) return;  // ← пропустить, не парсить
+            if (line.equals("EMPTY") || line.equals("END")) return;
+
             String[] v = line.split(SEP, 8);
-            System.out.println("Parsed type: " + Arrays.toString(v));
-            if (v.length < 8) {
-                System.err.println("Неполная строка типа: " + line);
+            if (v.length != 8) {
                 return;
             }
-            list.add(new InsuranceType(
-                    v[0],
-                    v[1].replace('_', ' '),
-                    Double.parseDouble(v[2]),
-                    Double.parseDouble(v[3]),
-                    Double.parseDouble(v[4]),
-                    Double.parseDouble(v[5]),
-                    Integer.parseInt(v[6]),
-                    Double.parseDouble(v[7])
-            ));
+
+            try {
+                // Проверяем, что это строка типа, а не случайная заявка или ошибка
+                if (!v[0].matches("[A-Z&]+")) {
+                    return;
+                }
+
+                InsuranceType t = new InsuranceType(
+                        v[0],
+                        v[1].replace('_', ' '),
+                        Double.parseDouble(v[2]),
+                        Double.parseDouble(v[3]),
+                        Double.parseDouble(v[4]),
+                        Double.parseDouble(v[5]),
+                        Integer.parseInt(v[6]),
+                        Double.parseDouble(v[7])
+                );
+                list.add(t);
+            } catch (Exception ex) {
+            }
         });
+
+        if (list.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Не удалось загрузить типы страхования. Повторите попытку позже.",
+                    "Ошибка загрузки", JOptionPane.ERROR_MESSAGE);
+        }
+
         return list;
     }
 
 
-    private Map<String,List<RiskCoeff>> loadCoeffs(MainFrame p) {
-        Map<String,List<RiskCoeff>> map = new HashMap<>();
+    private Map<String, List<RiskCoeff>> loadCoeffs(MainFrame p) {
+        Map<String, List<RiskCoeff>> map = new HashMap<>();
+
         p.sendSync("INCOEFF_LIST", line -> {
+            if ("EMPTY".equals(line) || "END".equals(line)) {
+                return;
+            }
+
             String[] v = line.split(SEP, 5);
             if (v.length < 5) {
-                System.err.println("Неполная строка коэффициента: " + line);
-                return;  // пропускаем
+                return;
             }
-            RiskCoeff rc = new RiskCoeff(
-                    v[0],
-                    v[1],
-                    v[2],
-                    v[3].replace('_',' '),
-                    Double.parseDouble(v[4])
-            );
-            map.computeIfAbsent(rc.getTypeCode(), k -> new ArrayList<>()).add(rc);
+
+            // Защита от случайных строк, не содержащих числовое значение
+            try {
+                double val = Double.parseDouble(v[4]);
+
+                RiskCoeff rc = new RiskCoeff(
+                        v[0], v[1], v[2],
+                        v[3].replace('_', ' '),
+                        val
+                );
+                map.computeIfAbsent(rc.getTypeCode(), k -> new ArrayList<>()).add(rc);
+
+            } catch (NumberFormatException ex) {
+                System.err.println("Пропущена строка (не число): " + line + " — " + ex.getMessage());
+            } catch (Exception ex) {
+                System.err.println("Ошибка парсинга коэффициента: " + line + " — " + ex.getMessage());
+            }
         });
+
         return map;
     }
 
@@ -244,11 +286,21 @@ public class NewAppDialog extends JDialog {
                 "NEWAPP %s %d %.2f",
                 type, months, cov
         );
+        btnSend.setEnabled(false);
         p.sendSync(cmd, resp::append);
-        if (!resp.toString().startsWith("OK")) {
-            JOptionPane.showMessageDialog(this, "Сервер: " + resp, "Ошибка", JOptionPane.ERROR_MESSAGE);
+        String response = resp.toString().trim();
+        if (response.isEmpty() || response.equalsIgnoreCase("EMPTY")) {
+            JOptionPane.showMessageDialog(this,
+                    "Сервер не вернул подтверждение.\nПопробуйте повторно нажать «Обновить» и убедитесь, что всё введено корректно.",
+                    "Ошибка", JOptionPane.ERROR_MESSAGE);
             return;
         }
+
+        if (!response.startsWith("OK")) {
+            JOptionPane.showMessageDialog(this, "Сервер: " + response, "Ошибка", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
         long appId = Long.parseLong(resp.toString().split(" ")[1]);
         comboMap.forEach((grp, cb) -> {
             String opt = cb.getSelectedItem().toString().replace(' ', '_');

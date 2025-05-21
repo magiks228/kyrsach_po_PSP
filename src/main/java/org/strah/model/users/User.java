@@ -92,4 +92,8 @@ public abstract class User implements Serializable {
     public String toString() {
         return String.format("[%s] %s (%s)", getRole(), fullName, login);
     }
+
+    public Role roleEnum() {
+        return this.role;
+    }
 }

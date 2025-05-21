@@ -105,10 +105,29 @@ public class UsersPanel extends JPanel {
        ------------------------------------------------------------ */
     private void changeRole(int row) {
         if (row < 0) return;
+
         String login = (String) model.getValueAt(row, 0);
-        Role current = Role.valueOf(((String) model.getValueAt(row, 1)).toUpperCase());
-        Role next    = current == Role.CLIENT ? Role.STAFF
-                : current == Role.STAFF ? Role.ADMIN : Role.CLIENT;
+        String roleText = ((String) model.getValueAt(row, 1)).toUpperCase();
+
+        Role current;
+        switch (roleText) {
+            case "КЛИЕНТ":
+                current = Role.CLIENT;
+                break;
+            case "СОТРУДНИК":
+                current = Role.STAFF;
+                break;
+            case "АДМИНИСТРАТОР":
+                current = Role.ADMIN;
+                break;
+            default:
+                JOptionPane.showMessageDialog(this, "Неизвестная роль: " + roleText);
+                return;
+        }
+
+        Role next = current == Role.CLIENT ? Role.STAFF
+                : current == Role.STAFF ? Role.ADMIN
+                : Role.CLIENT;
 
         if (JOptionPane.showConfirmDialog(this,
                 "Сменить роль " + login + " с " + current + " → " + next + " ?",
@@ -116,6 +135,7 @@ public class UsersPanel extends JPanel {
 
         sendAndRefresh("SETROLE " + login + " " + next.name(), "Роль изменена");
     }
+
 
     /* ------------------------------------------------------------
        Удаление
@@ -136,20 +156,35 @@ public class UsersPanel extends JPanel {
     private void sendAndRefresh(String cmd, String okMsg) {
         try {
             out.println(cmd);
-            String line;
-            while ((line = in.readLine()) != null) {
+            out.flush(); // гарантируем отправку
+
+            boolean responded = false;
+
+            while (true) {
+                String line = in.readLine();
+                if (line == null) break;
+
+
                 if (line.startsWith("OK")) {
                     JOptionPane.showMessageDialog(this, okMsg);
                     loadUsers();
-                    return;
+                    responded = true;
                 } else if (line.startsWith("ERR")) {
-                    JOptionPane.showMessageDialog(this, "Сервер: " + line, "Ошибка",
-                            JOptionPane.ERROR_MESSAGE);
-                    return;
-                } else if ("END".equals(line)) break;
+                    String msg = line.contains("HasPolicies")
+                            ? "Невозможно удалить пользователя: у него есть полисы."
+                            : "Ошибка: " + line;
+                    JOptionPane.showMessageDialog(this, msg, "Ошибка", JOptionPane.ERROR_MESSAGE);
+                    responded = true;
+                } else if ("END".equals(line)) {
+                    if (!responded) {
+                        JOptionPane.showMessageDialog(this, "Сервер завершил ответ без подтверждения.", "Нет ответа", JOptionPane.WARNING_MESSAGE);
+                    }
+                    break;
+                }
             }
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "Связь потеряна");
         }
     }
+
 }

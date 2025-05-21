@@ -8,12 +8,14 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.net.URL;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.function.Consumer;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
+import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableRowSorter;
 import javax.swing.RowFilter;
 
@@ -68,6 +70,7 @@ public class MainFrame extends JFrame {
 
         // --- Полисы ---
         JTable tblPol = new JTable(policyModel);
+        alignTableColumns(tblPol);
         TableRowSorter<PolicyModel> polSorter = new TableRowSorter<>(policyModel);
         tblPol.setRowSorter(polSorter);
         JComboBox<String> cbPolUserFilter = new JComboBox<>();
@@ -82,7 +85,25 @@ public class MainFrame extends JFrame {
             }
         });
         JButton bPol  = new JButton("Обновить");
-        bPol.addActionListener(e -> request("POLICIES", policyModel));
+        bPol.setActionCommand("refresh");
+        styleButton(bPol);
+        bPol.addActionListener(e -> {
+            request("POLICIES", policyModel);
+            if (isStaff) {
+                TableRowSorter<PolicyModel> policySorterFiltered = (TableRowSorter<PolicyModel>) tblPol.getRowSorter();
+                policySorterFiltered.setRowFilter(new RowFilter<PolicyModel, Integer>() {
+                    public boolean include(Entry<? extends PolicyModel, ? extends Integer> entry) {
+                        try {
+                            double coverage = Double.parseDouble(entry.getStringValue(2));
+                            return coverage > 0;
+                        } catch (Exception e) {
+                            return true;
+                        }
+                    }
+                });
+            }
+        });
+
         JPanel pnlPol = new JPanel(new BorderLayout());
         JPanel southPol = new JPanel();
         southPol.add(new JLabel("Фильтр по клиенту:"));
@@ -94,13 +115,22 @@ public class MainFrame extends JFrame {
 
         // --- Заявки-выплаты ---
         JTable tblCl = new JTable(claimModel);
+        alignTableColumns(tblCl);
         TableRowSorter<ClaimModel> sorter = new TableRowSorter<>(claimModel);
         tblCl.setRowSorter(sorter);
 
         JButton bCl = new JButton("Обновить");
+        bCl.setActionCommand("refresh");
+        styleButton(bCl);
         JButton bNewC = new JButton("Создать заявку");
+        bNewC.setActionCommand("plus");
+        styleButton(bNewC);
         JButton bApproveClaim = new JButton("Одобрить выплату");
+        bApproveClaim.setActionCommand("check");
+        styleButton(bApproveClaim);
         JButton bRejectClaim  = new JButton("Отклонить выплату");
+        bRejectClaim.setActionCommand("decline");
+        styleButton(bRejectClaim);
 
         JComboBox<String> cbFilter = new JComboBox<>(new String[] {
                 "Все", "NEW", "APPROVED", "REJECTED"
@@ -114,7 +144,19 @@ public class MainFrame extends JFrame {
             }
         });
 
-        bCl.addActionListener(e -> request("CLAIMS", claimModel));
+        bCl.addActionListener(e -> {
+            request("CLAIMS", claimModel);
+            if (isStaff) {
+                TableRowSorter<ClaimModel> claimSorterFiltered = (TableRowSorter<ClaimModel>) tblCl.getRowSorter();
+                claimSorterFiltered.setRowFilter(new RowFilter<ClaimModel, Integer>() {
+                    public boolean include(Entry<? extends ClaimModel, ? extends Integer> entry) {
+                        String status = entry.getStringValue(3);
+                        return !(status.equalsIgnoreCase("APPROVED") || status.equalsIgnoreCase("REJECTED"));
+                    }
+                });
+            }
+        });
+
         bNewC.addActionListener(e ->
                 new NewClaimDialog(this, policyModel.getCoverageMap()).setVisible(true)
         );
@@ -137,6 +179,7 @@ public class MainFrame extends JFrame {
 
         // --- Заявки-страхование ---
         JTable tblApp = new JTable(appModel);
+        alignTableColumns(tblApp);
         TableRowSorter<ApplicationModel> appSorter = new TableRowSorter<>(appModel);
         tblApp.setRowSorter(appSorter);
         JComboBox<String> cbAppFilter = new JComboBox<>(new String[] {
@@ -154,33 +197,62 @@ public class MainFrame extends JFrame {
         JScrollPane spApp = new JScrollPane(tblApp);
 
         JButton bAppRefresh = new JButton("Обновить");
+        bAppRefresh.setActionCommand("refresh");
+        styleButton(bAppRefresh);
         JButton bAppApprove = new JButton("Одобрить");
+        bAppApprove.setActionCommand("check");
+        styleButton(bAppApprove);
         JButton bAppDecline = new JButton("Отклонить");
+        bAppDecline.setActionCommand("decline");
+        styleButton(bAppDecline);
         JButton bAppNew     = new JButton("Новая заявка");
+        bAppNew.setActionCommand("plus");
+        styleButton(bAppNew);
         JButton bAppPay     = new JButton("Оплатить");
+        bAppPay.setActionCommand("pay");
+        styleButton(bAppPay);
         JButton bAppConfirm = new JButton("Выпустить полис");
+        bAppConfirm.setActionCommand("shield");
+        styleButton(bAppConfirm);
 
 
-        bAppRefresh.addActionListener(e -> request("APPLIST", appModel));
-        bAppNew    .addActionListener(e -> new NewAppDialog(this).setVisible(true));
+        bAppRefresh.addActionListener(e -> {
+            request("APPLIST", appModel);
+            if (isStaff) {
+                TableRowSorter<ApplicationModel> appSorterFiltered = (TableRowSorter<ApplicationModel>) tblApp.getRowSorter();
+                appSorterFiltered.setRowFilter(new RowFilter<ApplicationModel, Integer>() {
+                    public boolean include(Entry<? extends ApplicationModel, ? extends Integer> entry) {
+                        String status = entry.getStringValue(5);
+                        return !(status.equalsIgnoreCase("FINISHED") || status.equalsIgnoreCase("DECLINED"));
+                    }
+                });
+            }
+        });
+
+        bAppNew.addActionListener(e -> {
+            NewAppDialog dlg = new NewAppDialog(this);
+            if (!dlg.isFailedToLoad()) {
+                dlg.setVisible(true);
+            }
+        });
 
         if (isStaff) {
             bAppApprove.addActionListener(e -> {
-                int row = tblApp.getSelectedRow();
+                int row = tblApp.convertRowIndexToModel(tblApp.getSelectedRow());
                 if (row < 0) return;
                 long id = Long.parseLong(appModel.getValueAt(row, 0).toString());
                 sendCommand("APPROVE " + id, false);
                 request("APPLIST", appModel);
             });
             bAppDecline.addActionListener(e -> {
-                int row = tblApp.getSelectedRow();
+                int row = tblApp.convertRowIndexToModel(tblApp.getSelectedRow());
                 if (row < 0) return;
                 long id = Long.parseLong(appModel.getValueAt(row, 0).toString());
                 sendCommand("DECLINE " + id, false);
                 request("APPLIST", appModel);
             });
             bAppConfirm.addActionListener(e -> {
-                int row = tblApp.getSelectedRow();
+                int row = tblApp.convertRowIndexToModel(tblApp.getSelectedRow());
                 if (row < 0) {
                     JOptionPane.showMessageDialog(this, "Выберите заявку.");
                     return;
@@ -209,7 +281,7 @@ public class MainFrame extends JFrame {
         }
         if (isClient) {
             bAppPay.addActionListener(e -> {
-                int row = tblApp.getSelectedRow();
+                int row = tblApp.convertRowIndexToModel(tblApp.getSelectedRow());
                 if (row < 0) return;
                 String id = appModel.getValueAt(row, 0).toString();
                 sendCommand("PAY " + id, false);
@@ -247,6 +319,12 @@ public class MainFrame extends JFrame {
         setDefaultCloseOperation(EXIT_ON_CLOSE);
 
         request("APPLIST", appModel);
+
+
+        if (isStaff) {
+            tabs.addTab("История", new HistoryPanel(this));
+        }
+
     }
 
     private void processClaimAction(String cmd, JTable tbl) {
@@ -301,13 +379,13 @@ public class MainFrame extends JFrame {
                     handler.accept("EMPTY");
                     break;
                 }
-                System.out.println("Client received: " + line);
                 handler.accept(line);
             }
         } catch (IOException e) {
             JOptionPane.showMessageDialog(this, "Связь потеряна");
         }
     }
+
 
     public void createClaim(String polNum, double amt, String descr) {
         String cmd = "NEWCLAIM " + polNum + " " + amt + " " + descr.replace(' ', '_');
@@ -334,9 +412,7 @@ public class MainFrame extends JFrame {
 
     public java.util.List<String> loadClients() {
         java.util.List<String> clients = new java.util.ArrayList<>();
-        System.out.println("▶ Отправка команды USERS");
         sendSync("USERS", line -> {
-            System.out.println("◀ Ответ от сервера: " + line);
             if ("END".equals(line) || line.startsWith("ERR")) return;
             String[] p = line.split(" ", 3);
             if (p.length >= 2 && (
@@ -346,16 +422,13 @@ public class MainFrame extends JFrame {
                 clients.add(p[0]);
             }
         });
-        System.out.println("✅ Итоговый список клиентов: " + clients);
         return clients;
     }
 
     public void sendCommand(String cmd, boolean refreshPolicies) {
         StringBuilder resp = new StringBuilder();
-        System.out.println("▶ Команда отправлена: " + cmd);
 
         sendSync(cmd, line -> {
-            System.out.println("◀ Ответ: " + line);
             resp.append(line);
         });
 
@@ -379,4 +452,32 @@ public class MainFrame extends JFrame {
 
     public PrintWriter    getWriter()  { return out; }
     public BufferedReader getReader()  { return in; }
+
+    private void styleButton(JButton button) {
+        button.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+        button.setMargin(new Insets(6, 14, 6, 14));
+
+        String name = button.getActionCommand(); // Иконка по имени
+        if (name != null) {
+            String path = "/icons/" + name + ".png";
+            URL iconUrl = getClass().getResource(path);
+            if (iconUrl != null) {
+                button.setIcon(new ImageIcon(iconUrl));
+            } else {
+                System.err.println("⚠ Иконка не найдена: " + path);
+            }
+        }
+    }
+
+
+
+    private void alignTableColumns(JTable table) {
+        DefaultTableCellRenderer centerAlign = new DefaultTableCellRenderer();
+        centerAlign.setHorizontalAlignment(SwingConstants.CENTER);
+        for (int i = 0; i < table.getColumnCount(); i++) {
+            table.getColumnModel().getColumn(i).setCellRenderer(centerAlign);
+        }
+    }
+
+
 }

@@ -189,10 +189,21 @@ public class ClientHandler extends Thread {
     /* ---------- CLAIMS ---------- */
     private void handleClaims(PrintWriter out) {
         if (notLogged(out)) return;
+
         try (Session s = HibernateUtil.getSessionFactory().openSession()) {
-            List<Claim> list = s.createQuery(
-                    "from Claim c where c.policy is not null", Claim.class
-            ).list();
+            List<Claim> list;
+
+            if (currentUser.roleEnum().isClient()) {
+                list = s.createQuery("""
+                        select c from Claim c
+                        join c.policy p
+                        where p.customer.id = :uid
+                    """, Claim.class)
+                        .setParameter("uid", currentUser.getId())
+                        .list();
+            } else {
+                list = s.createQuery("from Claim c where c.policy is not null", Claim.class).list();
+            }
 
             if (list.isEmpty()) {
                 out.println("EMPTY");
@@ -200,21 +211,19 @@ public class ClientHandler extends Thread {
                 final String SEP = "\u001F";
                 for (Claim c : list) {
                     InsurancePolicy p = c.getPolicy();
-
-                    // Добавим защиту от проблем с null-полем policy (или если Hibernate не смог инициализировать)
                     if (p == null || p.getPolicyNumber() == null) continue;
 
                     out.println(
-                            c.getId()             + SEP +
-                                    p.getPolicyNumber()   + SEP +
-                                    c.getAmount()         + SEP +
+                            c.getId() + SEP +
+                                    p.getPolicyNumber() + SEP +
+                                    c.getAmount() + SEP +
                                     c.getStatus()
                     );
                 }
                 out.println("END");
             }
         } catch (Exception ex) {
-            ex.printStackTrace(); // оставим для логов
+            ex.printStackTrace();
             out.println("ERR " + ex.getMessage());
             out.println("END");
         }
@@ -396,6 +405,7 @@ public class ClientHandler extends Thread {
             out.println("OK");
             out.println("END");
         }
+        out.flush();
     }
 
     /* ============ NEWPOLICY (ручное) — использует InsuranceType =========== */
@@ -738,10 +748,8 @@ public class ClientHandler extends Thread {
             List<InsuranceType> list = s.createQuery("from InsuranceType", InsuranceType.class).list();
 
             if (list.isEmpty()) {
-                System.out.println(">>> [InsuranceTypes] Список пуст");
                 out.println("EMPTY");
             } else {
-                System.out.println(">>> [InsuranceTypes] Найдено типов: " + list.size());
                 for (InsuranceType t : list) {
                     String line = t.getCode() + SEP +
                             t.getNameRu() + SEP +
@@ -751,13 +759,11 @@ public class ClientHandler extends Thread {
                             t.getBaseRateMax() + SEP +
                             t.getDefaultTerm() + SEP +
                             t.getFranchisePercent();
-                    System.out.println(">>> [InsuranceTypes] Отправляем: " + line);
                     out.println(line);
                 }
             }
 
             out.println("END");
-            System.out.println(">>> [InsuranceTypes] Отправлен END");
         }
     }
 

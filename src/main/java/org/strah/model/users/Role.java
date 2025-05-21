@@ -17,4 +17,9 @@ public enum Role {
             if (r.title.equalsIgnoreCase(t)) return r;
         throw new IllegalArgumentException("Unknown role: " + t);
     }
+
+    /** Проверки роли */
+    public boolean isAdmin()  { return this == ADMIN; }
+    public boolean isStaff()  { return this == STAFF; }
+    public boolean isClient() { return this == CLIENT; }
 }
